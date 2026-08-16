@@ -1,0 +1,42 @@
+{
+  "lexicon": 1,
+  "id": "app.notesky.vault",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A Notesky vault: identifies one synced vault and carries the parameters needed to derive its master key from a passphrase.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["name", "formatVersion", "kdf", "checkValue", "createdAt"],
+        "properties": {
+          "name": { "type": "string", "description": "Human-readable vault name" },
+          "formatVersion": { "type": "integer", "minimum": 1 },
+          "kdf": { "type": "ref", "ref": "#kdfParams" },
+          "checkValue": { "type": "ref", "ref": "#checkValue" },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    },
+    "kdfParams": {
+      "type": "object",
+      "description": "Argon2id parameters for deriving the vault master key from a passphrase.",
+      "required": ["alg", "saltB64", "opsLimit", "memLimit"],
+      "properties": {
+        "alg": { "type": "string", "description": "KDF algorithm identifier, e.g. argon2id13" },
+        "saltB64": { "type": "string", "description": "base64: KDF salt" },
+        "opsLimit": { "type": "integer", "minimum": 1 },
+        "memLimit": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "checkValue": {
+      "type": "object",
+      "description": "Known plaintext encrypted with the master key, used to verify a passphrase before syncing.",
+      "required": ["nonce", "ciphertext"],
+      "properties": {
+        "nonce": { "type": "string", "description": "base64: XChaCha20-Poly1305 nonce" },
+        "ciphertext": { "type": "string", "description": "base64: XChaCha20-Poly1305 over the fixed check string" }
+      }
+    }
+  }
+}

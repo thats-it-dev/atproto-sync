@@ -1,0 +1,52 @@
+{
+  "lexicon": 1,
+  "id": "app.notesky.note",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A markdown note in a Notesky-synced vault.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["vault", "formatVersion", "updatedAt", "contentHash", "content"],
+        "properties": {
+          "vault": { "type": "string", "description": "rkey of the app.notesky.vault record this note belongs to" },
+          "formatVersion": { "type": "integer", "minimum": 1 },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "updatedAt": { "type": "string", "format": "datetime" },
+          "contentHash": { "type": "string", "description": "sha256 hex of the stored content bytes (ciphertext when encrypted) for transport integrity" },
+          "content": {
+            "type": "union",
+            "refs": ["#encrypted", "#plaintext"]
+          }
+        }
+      }
+    },
+    "encrypted": {
+      "type": "object",
+      "required": ["keyId", "wrappedKey", "keyNonce", "contentNonce", "ciphertext"],
+      "properties": {
+        "keyId": { "type": "string" },
+        "wrappedKey": { "type": "string", "description": "base64: per-note key wrapped by master key" },
+        "keyNonce": { "type": "string" },
+        "contentNonce": { "type": "string" },
+        "ciphertext": { "type": "string", "description": "base64: XChaCha20-Poly1305 over JSON {path, title, body}" }
+      }
+    },
+    "plaintext": {
+      "type": "object",
+      "required": ["path", "title", "slug", "text", "createdAt", "updatedAt"],
+      "properties": {
+        "path": { "type": "string" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "coverImage": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "datetime" },
+        "updatedAt": { "type": "string", "format": "datetime" }
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "lexicon": 1,
+  "id": "app.notesky.attachment",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A binary attachment (image, PDF, etc.) in a Notesky-synced vault. The file bytes live in a blob; metadata is encrypted or plaintext to match the notes that embed it.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["vault", "formatVersion", "updatedAt", "contentHash", "blob", "meta"],
+        "properties": {
+          "vault": { "type": "string", "description": "rkey of the app.notesky.vault record this attachment belongs to" },
+          "formatVersion": { "type": "integer", "minimum": 1 },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "updatedAt": { "type": "string", "format": "datetime" },
+          "contentHash": { "type": "string", "description": "sha256 hex of the stored blob bytes (ciphertext when encrypted) for transport integrity" },
+          "blob": { "type": "blob", "description": "The file bytes; encrypted with the note-key scheme unless the attachment is public" },
+          "meta": {
+            "type": "union",
+            "refs": ["#encrypted", "#plaintext"]
+          }
+        }
+      }
+    },
+    "encrypted": {
+      "type": "object",
+      "required": ["keyId", "wrappedKey", "keyNonce", "contentNonce", "ciphertext"],
+      "properties": {
+        "keyId": { "type": "string" },
+        "wrappedKey": { "type": "string", "description": "base64: per-attachment key wrapped by master key" },
+        "keyNonce": { "type": "string" },
+        "contentNonce": { "type": "string", "description": "base64: nonce used for the blob ciphertext" },
+        "ciphertext": { "type": "string", "description": "base64: XChaCha20-Poly1305 over JSON {path, mimeType}" }
+      }
+    },
+    "plaintext": {
+      "type": "object",
+      "required": ["path", "mimeType"],
+      "properties": {
+        "path": { "type": "string" },
+        "mimeType": { "type": "string" }
+      }
+    }
+  }
+}

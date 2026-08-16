@@ -1,0 +1,21 @@
+{
+  "lexicon": 1,
+  "id": "app.notesky.tombstone",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Marks a deleted Notesky record so other devices propagate the deletion.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["vault", "target", "collection", "deletedAt"],
+        "properties": {
+          "vault": { "type": "string", "description": "rkey of the app.notesky.vault record" },
+          "target": { "type": "string", "description": "rkey of the deleted record" },
+          "collection": { "type": "string", "description": "NSID of the collection the deleted record belonged to" },
+          "deletedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

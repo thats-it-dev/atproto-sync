@@ -1,0 +1,43 @@
+{
+  "lexicon": 1,
+  "id": "app.notesky.folder",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A folder in a Notesky-synced vault, so empty folders survive sync.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["vault", "formatVersion", "updatedAt", "meta"],
+        "properties": {
+          "vault": { "type": "string", "description": "rkey of the app.notesky.vault record this folder belongs to" },
+          "formatVersion": { "type": "integer", "minimum": 1 },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "updatedAt": { "type": "string", "format": "datetime" },
+          "meta": {
+            "type": "union",
+            "refs": ["#encrypted", "#plaintext"]
+          }
+        }
+      }
+    },
+    "encrypted": {
+      "type": "object",
+      "required": ["keyId", "wrappedKey", "keyNonce", "contentNonce", "ciphertext"],
+      "properties": {
+        "keyId": { "type": "string" },
+        "wrappedKey": { "type": "string", "description": "base64: per-folder key wrapped by master key" },
+        "keyNonce": { "type": "string" },
+        "contentNonce": { "type": "string" },
+        "ciphertext": { "type": "string", "description": "base64: XChaCha20-Poly1305 over JSON {path}" }
+      }
+    },
+    "plaintext": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string" }
+      }
+    }
+  }
+}
