@@ -39,3 +39,36 @@ describe('reconcile: no-op, push, pull', () => {
     ]);
   });
 });
+
+describe('reconcile: creates', () => {
+  it('pushCreates a local file with no index entry and no remote at that path', () => {
+    const ops = reconcile([file('new.md', 'brand new')], [], []);
+    expect(ops).toEqual([{ kind: 'pushCreate', path: 'new.md', content: 'brand new' }]);
+  });
+
+  it('pullCreates a remote record with no index entry and no local file', () => {
+    const ops = reconcile([], [note('r9', 'cid-5', 'incoming.md', 'from remote')], []);
+    expect(ops).toEqual([
+      { kind: 'pullCreate', path: 'incoming.md', rkey: 'r9', content: 'from remote', cid: 'cid-5' },
+    ]);
+  });
+
+  it('same-path simultaneous create resolves to a merge with an empty base', () => {
+    const ops = reconcile(
+      [file('both.md', 'local version')],
+      [note('r2', 'cid-3', 'both.md', 'remote version')],
+      []
+    );
+    expect(ops).toEqual([
+      {
+        kind: 'merge',
+        path: 'both.md',
+        rkey: 'r2',
+        base: '',
+        local: 'local version',
+        remote: 'remote version',
+        swapCid: 'cid-3',
+      },
+    ]);
+  });
+});

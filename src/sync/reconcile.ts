@@ -43,6 +43,8 @@ export function reconcile(
   const localByPath = new Map(local.map((f) => [f.path, f]));
   const remoteByRkey = new Map(remote.map((n) => [n.rkey, n]));
   const indexByRkey = new Map(index.map((e) => [e.rkey, e]));
+  const indexByPath = new Map(index.map((e) => [e.path, e]));
+  const remoteByPath = new Map(remote.filter((n) => !n.deleted).map((n) => [n.path, n]));
 
   // Indexed notes: the three-way comparison pivots on the index entry.
   for (const entry of index) {
@@ -74,6 +76,39 @@ export function reconcile(
         cid: rec.cid,
       });
     }
+  }
+
+  // Unindexed local files: new on this device.
+  for (const f of local) {
+    if (indexByPath.has(f.path)) continue;
+    const rec = remoteByPath.get(f.path);
+    if (rec && !indexByRkey.has(rec.rkey)) {
+      // Simultaneous create on both sides at the same path: merge with empty base.
+      ops.push({
+        kind: 'merge',
+        path: f.path,
+        rkey: rec.rkey,
+        base: '',
+        local: f.content,
+        remote: rec.content,
+        swapCid: rec.cid,
+      });
+    } else if (!rec) {
+      ops.push({ kind: 'pushCreate', path: f.path, content: f.content });
+    }
+  }
+
+  // Unindexed remote records: created elsewhere, unseen here.
+  for (const rec of remote) {
+    if (rec.deleted || indexByRkey.has(rec.rkey)) continue;
+    if (localByPath.has(rec.path)) continue; // handled above as same-path create
+    ops.push({
+      kind: 'pullCreate',
+      path: rec.path,
+      rkey: rec.rkey,
+      content: rec.content,
+      cid: rec.cid,
+    });
   }
 
   return ops;
