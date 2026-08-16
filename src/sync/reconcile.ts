@@ -52,11 +52,34 @@ export function reconcile(
     // Local file is looked up at the remote's current path if it moved, else the indexed path.
     const localFile = localByPath.get(entry.path);
 
-    if (!rec) continue; // remote record vanished without tombstone: handled with deletes later
-    if (!localFile) continue; // local deletions handled later
+    if (!rec) continue; // remote record vanished without tombstone: nothing to reconcile against
+
+    const remoteChanged = rec.cid !== entry.lastCid;
+
+    if (!localFile) {
+      // Local file deleted since last sync.
+      if (remoteChanged && !rec.deleted) {
+        // Edit wins over local delete: restore the remote edit.
+        ops.push({ kind: 'pull', path: rec.path, rkey: entry.rkey, content: rec.content, cid: rec.cid });
+      } else if (!rec.deleted) {
+        ops.push({ kind: 'deleteRemote', rkey: entry.rkey, path: entry.path, swapCid: rec.cid });
+      }
+      // Deleted on both sides: nothing to do.
+      continue;
+    }
 
     const localChanged = localFile.content !== entry.baseContent;
-    const remoteChanged = rec.cid !== entry.lastCid;
+
+    if (rec.deleted) {
+      // Remote tombstoned.
+      if (localChanged) {
+        // Edit wins over remote delete: resurrect with the local edit.
+        ops.push({ kind: 'push', path: localFile.path, rkey: entry.rkey, content: localFile.content, swapCid: rec.cid });
+      } else {
+        ops.push({ kind: 'deleteLocal', path: localFile.path, rkey: entry.rkey });
+      }
+      continue;
+    }
 
     if (!localChanged && !remoteChanged) continue;
     if (localChanged && !remoteChanged) {

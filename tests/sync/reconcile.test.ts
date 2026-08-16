@@ -61,6 +61,48 @@ describe('reconcile: concurrent edits', () => {
   });
 });
 
+describe('reconcile: deletes with edit-wins semantics', () => {
+  it('deletes remote when the local file is gone and remote is unchanged', () => {
+    const ops = reconcile(
+      [],
+      [note('r1', 'cid-1', 'a.md', 'content')],
+      [entry('a.md', 'r1', 'content', 'cid-1')]
+    );
+    expect(ops).toEqual([{ kind: 'deleteRemote', rkey: 'r1', path: 'a.md', swapCid: 'cid-1' }]);
+  });
+
+  it('deletes local when remote is tombstoned and local is unedited', () => {
+    const ops = reconcile(
+      [file('a.md', 'content')],
+      [note('r1', 'cid-2', 'a.md', 'content', true)],
+      [entry('a.md', 'r1', 'content', 'cid-1')]
+    );
+    expect(ops).toEqual([{ kind: 'deleteLocal', path: 'a.md', rkey: 'r1' }]);
+  });
+
+  it('resurrects the note via push when remote is tombstoned but local was edited', () => {
+    const ops = reconcile(
+      [file('a.md', 'edited after the delete')],
+      [note('r1', 'cid-2', 'a.md', 'content', true)],
+      [entry('a.md', 'r1', 'content', 'cid-1')]
+    );
+    expect(ops).toEqual([
+      { kind: 'push', path: 'a.md', rkey: 'r1', content: 'edited after the delete', swapCid: 'cid-2' },
+    ]);
+  });
+
+  it('pulls the remote edit when local deleted but remote changed', () => {
+    const ops = reconcile(
+      [],
+      [note('r1', 'cid-2', 'a.md', 'remote edit')],
+      [entry('a.md', 'r1', 'content', 'cid-1')]
+    );
+    expect(ops).toEqual([
+      { kind: 'pull', path: 'a.md', rkey: 'r1', content: 'remote edit', cid: 'cid-2' },
+    ]);
+  });
+});
+
 describe('reconcile: creates', () => {
   it('pushCreates a local file with no index entry and no remote at that path', () => {
     const ops = reconcile([file('new.md', 'brand new')], [], []);
