@@ -1,0 +1,9 @@
+{
+  "id": "notesky-sync",
+  "name": "Notesky Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Sync your vault to your ATProto PDS (Bluesky, Blacksky, Eurosky, self-hosted). E2E-encrypted, with per-note publishing.",
+  "author": "Michael Gutensohn",
+  "isDesktopOnly": false
+}
