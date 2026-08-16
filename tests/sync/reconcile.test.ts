@@ -103,6 +103,36 @@ describe('reconcile: deletes with edit-wins semantics', () => {
   });
 });
 
+describe('reconcile: duplicate remote records at one path', () => {
+  it('keeps the lowest rkey and deletes the duplicate', () => {
+    const ops = reconcile(
+      [file('a.md', 'mine')],
+      [note('r1', 'cid-1', 'a.md', 'mine'), note('r9', 'cid-9', 'a.md', 'theirs')],
+      [entry('a.md', 'r1', 'mine', 'cid-1')]
+    );
+    expect(ops).toEqual([{ kind: 'deleteRemote', rkey: 'r9', path: 'a.md', swapCid: 'cid-9' }]);
+  });
+
+  it('drops index entries whose record vanished so the file re-merges with the survivor', () => {
+    const ops = reconcile(
+      [file('a.md', 'mine')],
+      [note('r1', 'cid-1', 'a.md', 'theirs')],
+      [entry('a.md', 'r9', 'mine', 'cid-9')] // r9 no longer exists remotely
+    );
+    expect(ops).toEqual([
+      {
+        kind: 'merge',
+        path: 'a.md',
+        rkey: 'r1',
+        base: '',
+        local: 'mine',
+        remote: 'theirs',
+        swapCid: 'cid-1',
+      },
+    ]);
+  });
+});
+
 describe('reconcile: creates', () => {
   it('pushCreates a local file with no index entry and no remote at that path', () => {
     const ops = reconcile([file('new.md', 'brand new')], [], []);

@@ -65,6 +65,14 @@ export class SyncEngine {
 
     const indexEntries = await store.load();
     const indexByRkey = new Map(indexEntries.map((e) => [e.rkey, e]));
+    // One index entry per path: a newly indexed rkey supersedes whatever
+    // previously owned that path (e.g. a canonicalization loser).
+    const setEntry = (entry: IndexEntry) => {
+      for (const [rkey, e] of indexByRkey) {
+        if (e.path === entry.path && rkey !== entry.rkey) indexByRkey.delete(rkey);
+      }
+      indexByRkey.set(entry.rkey, entry);
+    };
     const local = await vault.readAll();
 
     const noteRecords = await pds.listRecords(NOTE_COLLECTION);
@@ -113,7 +121,7 @@ export class SyncEngine {
               await this.encryptToRecord(op.path, op.content),
               null
             );
-            indexByRkey.set(rkey, { path: op.path, rkey, baseContent: op.content, lastCid: cid });
+            setEntry({ path: op.path, rkey, baseContent: op.content, lastCid: cid });
             break;
           }
           case 'push': {
@@ -129,7 +137,7 @@ export class SyncEngine {
               const tomb = tombstoneByTarget.get(op.rkey);
               if (tomb) await pds.deleteRecord(TOMBSTONE_COLLECTION, tomb.rkey);
             }
-            indexByRkey.set(op.rkey, {
+            setEntry({
               path: op.path,
               rkey: op.rkey,
               baseContent: op.content,
@@ -144,7 +152,7 @@ export class SyncEngine {
             if (previous && previous.path !== op.path) {
               await vault.remove(previous.path); // renamed remotely
             }
-            indexByRkey.set(op.rkey, {
+            setEntry({
               path: op.path,
               rkey: op.rkey,
               baseContent: op.content,
@@ -159,7 +167,7 @@ export class SyncEngine {
               const conflictPath = op.path.replace(/(\.md)?$/i, (ext) => ` (conflict)${ext}`);
               await vault.write(conflictPath, op.local);
               await vault.write(op.path, op.remote);
-              indexByRkey.set(op.rkey, {
+              setEntry({
                 path: op.path,
                 rkey: op.rkey,
                 baseContent: op.remote,
@@ -174,7 +182,7 @@ export class SyncEngine {
               op.swapCid
             );
             await vault.write(op.path, r.merged);
-            indexByRkey.set(op.rkey, {
+            setEntry({
               path: op.path,
               rkey: op.rkey,
               baseContent: r.merged,

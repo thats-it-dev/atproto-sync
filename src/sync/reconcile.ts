@@ -40,14 +40,71 @@ export function reconcile(
   index: IndexEntry[]
 ): Op[] {
   const ops: Op[] = [];
-  const localByPath = new Map(local.map((f) => [f.path, f]));
+
+  // Canonicalize: concurrent create/resurrect races can leave several live
+  // records at one path. The lowest rkey wins everywhere (deterministic across
+  // devices); losers are deleted, and their content folds back in through the
+  // same-path create-merge below.
+  const liveByPath = new Map<string, RemoteNote[]>();
+  for (const n of remote) {
+    if (n.deleted) continue;
+    const group = liveByPath.get(n.path);
+    if (group) group.push(n);
+    else liveByPath.set(n.path, [n]);
+  }
+  const loserRkeys = new Set<string>();
+  for (const group of liveByPath.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort((a, b) => (a.rkey < b.rkey ? -1 : 1));
+    for (const loser of sorted.slice(1)) {
+      loserRkeys.add(loser.rkey);
+      ops.push({ kind: 'deleteRemote', rkey: loser.rkey, path: loser.path, swapCid: loser.cid });
+    }
+  }
+  remote = remote.filter((n) => !loserRkeys.has(n.rkey));
+
   const remoteByRkey = new Map(remote.map((n) => [n.rkey, n]));
+  // Index entries whose record vanished (canonicalization loser, or deleted
+  // without tombstone) are dropped: their local file re-enters as a create.
+  index = index.filter((e) => remoteByRkey.has(e.rkey));
+
+  const localByPath = new Map(local.map((f) => [f.path, f]));
   const indexByRkey = new Map(index.map((e) => [e.rkey, e]));
   const indexByPath = new Map(index.map((e) => [e.path, e]));
   const remoteByPath = new Map(remote.filter((n) => !n.deleted).map((n) => [n.path, n]));
 
+  // Rename detection: an index entry whose file vanished, paired with an
+  // unindexed local file of identical content, is a move — push the new path
+  // onto the same rkey instead of delete+create.
+  const renamedRkeys = new Set<string>();
+  const renamedPaths = new Set<string>();
+  for (const entry of index) {
+    if (localByPath.has(entry.path)) continue;
+    const rec = remoteByRkey.get(entry.rkey);
+    if (!rec || rec.deleted || rec.cid !== entry.lastCid) continue;
+    const moved = local.find(
+      (f) =>
+        !indexByPath.has(f.path) &&
+        !remoteByPath.has(f.path) &&
+        !renamedPaths.has(f.path) &&
+        f.content === entry.baseContent
+    );
+    if (moved) {
+      ops.push({
+        kind: 'push',
+        path: moved.path,
+        rkey: entry.rkey,
+        content: moved.content,
+        swapCid: rec.cid,
+      });
+      renamedRkeys.add(entry.rkey);
+      renamedPaths.add(moved.path);
+    }
+  }
+
   // Indexed notes: the three-way comparison pivots on the index entry.
   for (const entry of index) {
+    if (renamedRkeys.has(entry.rkey)) continue;
     const rec = remoteByRkey.get(entry.rkey);
     // Local file is looked up at the remote's current path if it moved, else the indexed path.
     const localFile = localByPath.get(entry.path);
@@ -114,7 +171,7 @@ export function reconcile(
 
   // Unindexed local files: new on this device.
   for (const f of local) {
-    if (indexByPath.has(f.path)) continue;
+    if (indexByPath.has(f.path) || renamedPaths.has(f.path)) continue;
     const rec = remoteByPath.get(f.path);
     if (rec && !indexByRkey.has(rec.rkey)) {
       // Simultaneous create on both sides at the same path: merge with empty base.
