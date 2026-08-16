@@ -1,10 +1,25 @@
 import {
   AtpAgent,
+  ComAtprotoRepoApplyWrites,
   ComAtprotoRepoDeleteRecord,
   ComAtprotoRepoGetRecord,
   ComAtprotoRepoPutRecord,
+  XRPCError,
 } from '@atproto/api';
 import { CasError, PdsClient } from '../sync/pds';
+
+/** Translate PDS transport errors into messages a user can act on. */
+function mapPdsError(err: unknown): unknown {
+  if (err instanceof XRPCError) {
+    if (err.status === 429 || err.error === 'RateLimitExceeded') {
+      return new Error('Your PDS is rate-limiting requests; sync will retry on the next interval.');
+    }
+    if ((err.status as number) === 507 || /quota|too large|storage/i.test(err.error ?? '')) {
+      return new Error('Your PDS reports it is out of storage; free space or contact your host.');
+    }
+  }
+  return err;
+}
 
 /** PdsClient over a logged-in AtpAgent, scoped to the account's own repo. */
 export class RealPdsClient implements PdsClient {
@@ -34,7 +49,43 @@ export class RealPdsClient implements PdsClient {
       if (err instanceof ComAtprotoRepoPutRecord.InvalidSwapError) {
         throw new CasError(err.message);
       }
-      throw err;
+      throw mapPdsError(err);
+    }
+  }
+
+  /** Atomic batch create via com.atproto.repo.applyWrites. */
+  async applyCreates(
+    writes: Array<{ collection: string; rkey: string; value: unknown }>
+  ): Promise<Array<{ cid: string }>> {
+    try {
+      const res = await this.agent.com.atproto.repo.applyWrites({
+        repo: this.did,
+        validate: false,
+        writes: writes.map((w) => ({
+          $type: 'com.atproto.repo.applyWrites#create' as const,
+          collection: w.collection,
+          rkey: w.rkey,
+          value: w.value as Record<string, unknown>,
+        })),
+      });
+      const results = res.data.results ?? [];
+      return writes.map((_, i) => {
+        const r = results[i];
+        if (!r || !('cid' in r) || typeof r.cid !== 'string') {
+          throw new Error('applyWrites returned no cid for a create');
+        }
+        return { cid: r.cid };
+      });
+    } catch (err) {
+      if (err instanceof ComAtprotoRepoApplyWrites.InvalidSwapError) {
+        throw new CasError(err.message);
+      }
+      // A create colliding with an existing record surfaces as a generic
+      // InvalidRequest; treat it as a CAS failure so the engine re-runs.
+      if (err instanceof XRPCError && /already exists|duplicate/i.test(err.message)) {
+        throw new CasError(err.message);
+      }
+      throw mapPdsError(err);
     }
   }
 
@@ -53,7 +104,7 @@ export class RealPdsClient implements PdsClient {
       if (err instanceof ComAtprotoRepoGetRecord.RecordNotFoundError) {
         return null;
       }
-      throw err;
+      throw mapPdsError(err);
     }
   }
 
@@ -89,7 +140,7 @@ export class RealPdsClient implements PdsClient {
       if (err instanceof ComAtprotoRepoDeleteRecord.InvalidSwapError) {
         throw new CasError(err.message);
       }
-      throw err;
+      throw mapPdsError(err);
     }
   }
 }

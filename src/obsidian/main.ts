@@ -85,6 +85,7 @@ export default class NoteskyPlugin extends Plugin {
     }
     try {
       this.pdsClient = await login({ identifier: s.identifier, password: s.appPassword });
+      let progressNotice: Notice | null = null;
       this.engine = new SyncEngine({
         pds: this.pdsClient,
         vault: new ObsidianVaultAdapter(this.app, () => this.settings.ignorePatterns),
@@ -92,6 +93,16 @@ export default class NoteskyPlugin extends Plugin {
         masterKey: await fromB64(s.masterKeyB64),
         vaultRkey: s.vaultRkey,
         conflictMode: s.conflictMode,
+        interBatchDelayMs: 300,
+        onProgress: (done, total) => {
+          if (total <= 50) return;
+          if (!progressNotice) progressNotice = new Notice('', 0);
+          progressNotice.setMessage(`Notesky: syncing ${done}/${total}…`);
+          if (done >= total) {
+            progressNotice.hide();
+            progressNotice = null;
+          }
+        },
       });
       await this.runSync();
     } catch (err) {

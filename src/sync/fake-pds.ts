@@ -55,6 +55,24 @@ export class FakePds implements PdsClient {
     }));
   }
 
+  async applyCreates(
+    writes: Array<{ collection: string; rkey: string; value: unknown }>
+  ): Promise<Array<{ cid: string }>> {
+    // Validate everything before applying anything: all-or-nothing.
+    for (const w of writes) {
+      if (this.collection(w.collection).has(w.rkey)) {
+        throw new CasError(`record ${w.collection}/${w.rkey} already exists`);
+      }
+    }
+    const results: Array<{ cid: string }> = [];
+    for (const w of writes) {
+      const cid = this.nextCid();
+      this.collection(w.collection).set(w.rkey, { cid, value: structuredClone(w.value) });
+      results.push({ cid });
+    }
+    return results;
+  }
+
   async deleteRecord(collection: string, rkey: string, swapCid?: string): Promise<void> {
     const col = this.collection(collection);
     const existing = col.get(rkey);

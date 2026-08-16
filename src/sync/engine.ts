@@ -35,6 +35,16 @@ export interface SyncEngineOptions {
   now?: () => string;
   /** Override rkey generation (tests use a deterministic counter). */
   rkeyGen?: () => string;
+  /** Max writes per burst/batch (default 10). */
+  batchSize?: number;
+  /** Pause between bursts so big initial syncs don't hammer the PDS. */
+  interBatchDelayMs?: number;
+  /** Called after each executed op (and each batch) with (done, total). */
+  onProgress?: (done: number, total: number) => void;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 let rkeyCounter = 0;
@@ -119,23 +129,75 @@ export class SyncEngine {
     }
 
     const tombstonedRkeys = new Set(tombstoneByTarget.keys());
-    const ops = reconcile(local, remote, indexEntries);
+    const allOps = reconcile(local, remote, indexEntries);
     let dirty = false;
 
-    for (const op of ops) {
+    const batchSize = this.opts.batchSize ?? 10;
+    const delayMs = this.opts.interBatchDelayMs ?? 0;
+    const total = allOps.length;
+    let done = 0;
+    let burst = 0;
+    const progress = async (count: number) => {
+      done += count;
+      burst += count;
+      this.opts.onProgress?.(done, total);
+      if (burst >= batchSize && done < total) {
+        burst = 0;
+        if (delayMs > 0) await sleep(delayMs);
+      }
+    };
+
+    // Creates are order-independent of the other ops (paths are disjoint), so
+    // they run as atomic batches; everything else executes in reconcile order.
+    const creates = allOps.filter((op) => op.kind === 'pushCreate');
+    const ops = allOps.filter((op) => op.kind !== 'pushCreate');
+
+    try {
+      for (let i = 0; i < creates.length; i += batchSize) {
+        const chunk = creates.slice(i, i + batchSize);
+        try {
+          if (pds.applyCreates) {
+            const writes = await Promise.all(
+              chunk.map(async (op) => ({
+                collection: NOTE_COLLECTION,
+                rkey: this.newRkey(),
+                value: await this.encryptToRecord(op.path, op.content),
+              }))
+            );
+            const results = await pds.applyCreates(writes);
+            chunk.forEach((op, j) =>
+              setEntry({
+                path: op.path,
+                rkey: writes[j].rkey,
+                baseContent: op.content,
+                lastCid: results[j].cid,
+              })
+            );
+          } else {
+            for (const op of chunk) {
+              const rkey = this.newRkey();
+              const { cid } = await pds.putRecord(
+                NOTE_COLLECTION,
+                rkey,
+                await this.encryptToRecord(op.path, op.content),
+                null
+              );
+              setEntry({ path: op.path, rkey, baseContent: op.content, lastCid: cid });
+            }
+          }
+        } catch (err) {
+          if (err instanceof CasError) {
+            dirty = true;
+          } else {
+            throw err;
+          }
+        }
+        await progress(chunk.length);
+      }
+
+      for (const op of ops) {
       try {
         switch (op.kind) {
-          case 'pushCreate': {
-            const rkey = this.newRkey();
-            const { cid } = await pds.putRecord(
-              NOTE_COLLECTION,
-              rkey,
-              await this.encryptToRecord(op.path, op.content),
-              null
-            );
-            setEntry({ path: op.path, rkey, baseContent: op.content, lastCid: cid });
-            break;
-          }
           case 'push': {
             // A push onto a tombstoned rkey recreates the record (edit wins over delete).
             const resurrect = tombstonedRkeys.has(op.rkey);
@@ -224,13 +286,16 @@ export class SyncEngine {
       } catch (err) {
         if (err instanceof CasError) {
           dirty = true; // lost a race; the re-run sees fresh cids
-          continue;
+        } else {
+          throw err;
         }
-        throw err;
       }
+      await progress(1);
+      }
+    } finally {
+      // Persist partial progress: an interrupted initial sync resumes cleanly.
+      await store.save([...indexByRkey.values()]);
     }
-
-    await store.save([...indexByRkey.values()]);
     return dirty;
   }
 

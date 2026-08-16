@@ -50,6 +50,29 @@ describe('FakePds', () => {
     expect(cid).toBeTruthy();
   });
 
+  it('applyCreates writes a batch atomically and returns cids in order', async () => {
+    const pds = new FakePds();
+    const results = await pds.applyCreates([
+      { collection: 'c', rkey: 'k1', value: { v: 1 } },
+      { collection: 'c', rkey: 'k2', value: { v: 2 } },
+    ]);
+    expect(results).toHaveLength(2);
+    expect((await pds.getRecord('c', 'k1'))?.cid).toBe(results[0].cid);
+    expect((await pds.getRecord('c', 'k2'))?.cid).toBe(results[1].cid);
+  });
+
+  it('applyCreates applies nothing when any record already exists', async () => {
+    const pds = new FakePds();
+    await pds.putRecord('c', 'k2', { existing: true });
+    await expect(
+      pds.applyCreates([
+        { collection: 'c', rkey: 'k1', value: { v: 1 } },
+        { collection: 'c', rkey: 'k2', value: { v: 2 } },
+      ])
+    ).rejects.toThrow(CasError);
+    expect(await pds.getRecord('c', 'k1')).toBeNull(); // atomic: k1 not written
+  });
+
   it('delete removes the record; delete with a stale cid throws', async () => {
     const pds = new FakePds();
     const { cid: stale } = await pds.putRecord('c', 'k', { v: 1 });
