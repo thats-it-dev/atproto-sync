@@ -42,6 +42,13 @@ export interface TestDevice {
   index: FakeIndexStore;
 }
 
+let rkeyCounter = 0;
+
+/** Deterministic, sortable rkeys so scenario/fuzz failures reproduce exactly. */
+function testRkey(): string {
+  return `r${(rkeyCounter++).toString(36).padStart(8, '0')}`;
+}
+
 export function makeEngine(
   pds: PdsClient,
   masterKey: Uint8Array,
@@ -55,6 +62,7 @@ export function makeEngine(
     index,
     masterKey,
     vaultRkey: 'test-vault',
+    rkeyGen: testRkey,
     ...options,
   });
   return { engine, vault, index };

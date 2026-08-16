@@ -102,6 +102,10 @@ export function reconcile(
     }
   }
 
+  // Paths whose local file a deleteLocal op will remove this cycle: an
+  // unindexed remote at such a path is pulled (ordered after the delete).
+  const vacatedPaths = new Set<string>();
+
   // Indexed notes: the three-way comparison pivots on the index entry.
   for (const entry of index) {
     if (renamedRkeys.has(entry.rkey)) continue;
@@ -134,6 +138,7 @@ export function reconcile(
         ops.push({ kind: 'push', path: localFile.path, rkey: entry.rkey, content: localFile.content, swapCid: rec.cid });
       } else {
         ops.push({ kind: 'deleteLocal', path: localFile.path, rkey: entry.rkey });
+        vacatedPaths.add(localFile.path);
       }
       continue;
     }
@@ -192,7 +197,9 @@ export function reconcile(
   // Unindexed remote records: created elsewhere, unseen here.
   for (const rec of remote) {
     if (rec.deleted || indexByRkey.has(rec.rkey)) continue;
-    if (localByPath.has(rec.path)) continue; // handled above as same-path create
+    // A local file at this path blocks the pull (same-path create merges above)
+    // unless a deleteLocal op is vacating it this cycle.
+    if (localByPath.has(rec.path) && !vacatedPaths.has(rec.path)) continue;
     ops.push({
       kind: 'pullCreate',
       path: rec.path,

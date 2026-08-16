@@ -27,6 +27,8 @@ export interface SyncEngineOptions {
   vaultRkey: string;
   conflictMode?: ConflictMode;
   now?: () => string;
+  /** Override rkey generation (tests use a deterministic counter). */
+  rkeyGen?: () => string;
 }
 
 let rkeyCounter = 0;
@@ -57,6 +59,10 @@ export class SyncEngine {
 
   private nowIso(): string {
     return this.opts.now ? this.opts.now() : new Date().toISOString();
+  }
+
+  private newRkey(): string {
+    return this.opts.rkeyGen ? this.opts.rkeyGen() : generateRkey();
   }
 
   /** Returns true if a CAS conflict made the cycle dirty. */
@@ -114,7 +120,7 @@ export class SyncEngine {
       try {
         switch (op.kind) {
           case 'pushCreate': {
-            const rkey = generateRkey();
+            const rkey = this.newRkey();
             const { cid } = await pds.putRecord(
               NOTE_COLLECTION,
               rkey,
@@ -199,7 +205,7 @@ export class SyncEngine {
               collection: NOTE_COLLECTION,
               deletedAt: this.nowIso(),
             };
-            await pds.putRecord(TOMBSTONE_COLLECTION, generateRkey(), tombstone, null);
+            await pds.putRecord(TOMBSTONE_COLLECTION, this.newRkey(), tombstone, null);
             indexByRkey.delete(op.rkey);
             break;
           }

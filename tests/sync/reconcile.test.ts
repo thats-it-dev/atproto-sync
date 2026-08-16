@@ -133,6 +133,23 @@ describe('reconcile: duplicate remote records at one path', () => {
   });
 });
 
+describe('reconcile: delete + replacement in one cycle', () => {
+  it('pulls an unindexed remote into a path being vacated by deleteLocal', () => {
+    const ops = reconcile(
+      [file('a.md', 'content')],
+      [
+        note('r2', 'cid-2', 'a.md', 'replacement'),
+        note('r1', 'cid-1', 'a.md', 'content', true), // tombstoned, local unedited
+      ],
+      [entry('a.md', 'r1', 'content', 'cid-1')]
+    );
+    expect(ops).toEqual([
+      { kind: 'deleteLocal', path: 'a.md', rkey: 'r1' },
+      { kind: 'pullCreate', path: 'a.md', rkey: 'r2', content: 'replacement', cid: 'cid-2' },
+    ]);
+  });
+});
+
 describe('reconcile: creates', () => {
   it('pushCreates a local file with no index entry and no remote at that path', () => {
     const ops = reconcile([file('new.md', 'brand new')], [], []);
