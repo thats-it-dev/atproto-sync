@@ -40,6 +40,27 @@ describe('reconcile: no-op, push, pull', () => {
   });
 });
 
+describe('reconcile: concurrent edits', () => {
+  it('emits a single merge op carrying base, both sides, and the current remote cid', () => {
+    const ops = reconcile(
+      [file('a.md', 'local edit')],
+      [note('r1', 'cid-9', 'a.md', 'remote edit')],
+      [entry('a.md', 'r1', 'base text', 'cid-1')]
+    );
+    expect(ops).toEqual([
+      {
+        kind: 'merge',
+        path: 'a.md',
+        rkey: 'r1',
+        base: 'base text',
+        local: 'local edit',
+        remote: 'remote edit',
+        swapCid: 'cid-9',
+      },
+    ]);
+  });
+});
+
 describe('reconcile: creates', () => {
   it('pushCreates a local file with no index entry and no remote at that path', () => {
     const ops = reconcile([file('new.md', 'brand new')], [], []);

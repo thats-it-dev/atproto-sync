@@ -75,6 +75,17 @@ export function reconcile(
         content: rec.content,
         cid: rec.cid,
       });
+    } else {
+      // Both changed: three-way merge, CASing against the remote we merged with.
+      ops.push({
+        kind: 'merge',
+        path: localFile.path,
+        rkey: entry.rkey,
+        base: entry.baseContent,
+        local: localFile.content,
+        remote: rec.content,
+        swapCid: rec.cid,
+      });
     }
   }
 
