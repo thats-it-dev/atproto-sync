@@ -5,6 +5,7 @@ import { IndexedDbStore } from './store';
 import { ObsidianVaultAdapter } from './vault-adapter';
 import { RealPdsClient, login } from './pds-client';
 import { NoteskySettingTab } from './settings';
+import { registerPublishCommands } from './publish';
 
 export interface NoteskySettings {
   identifier: string;
@@ -55,6 +56,7 @@ export default class NoteskyPlugin extends Plugin {
       name: 'Sync now',
       callback: () => void this.runSync(),
     });
+    registerPublishCommands(this);
 
     this.app.workspace.onLayoutReady(() => void this.initEngine());
 

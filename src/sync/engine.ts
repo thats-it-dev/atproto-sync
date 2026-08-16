@@ -1,4 +1,10 @@
-import { NOTE_COLLECTION, TOMBSTONE_COLLECTION, buildEncryptedNote } from '../lexicon/build';
+import {
+  NOTE_COLLECTION,
+  TOMBSTONE_COLLECTION,
+  buildEncryptedNote,
+  buildPlaintextNote,
+} from '../lexicon/build';
+import { getPublicSlug, isPublicNote } from '../publish/frontmatter';
 import type { NoteRecord, TombstoneRecord } from '../lexicon/types';
 import { decryptNote, encryptNote } from '../crypto/note';
 import { CasError, PdsClient } from './pds';
@@ -229,6 +235,17 @@ export class SyncEngine {
   }
 
   private async encryptToRecord(path: string, content: string): Promise<NoteRecord> {
+    if (isPublicNote(content)) {
+      // The frontmatter flag is the source of truth: publish plaintext.
+      return buildPlaintextNote({
+        vault: this.opts.vaultRkey,
+        path,
+        text: content,
+        slug: getPublicSlug(content),
+        createdAt: this.nowIso(),
+        updatedAt: this.nowIso(),
+      });
+    }
     const title = (path.split('/').pop() ?? path).replace(/\.md$/i, '');
     const encrypted = await encryptNote({ path, title, body: content }, this.opts.masterKey);
     return buildEncryptedNote({
