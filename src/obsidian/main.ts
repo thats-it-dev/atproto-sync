@@ -4,6 +4,7 @@ import { fromB64 } from '../crypto/box';
 import { IndexedDbStore } from './store';
 import { ObsidianVaultAdapter } from './vault-adapter';
 import { RealPdsClient, login } from './pds-client';
+import { NoteskySettingTab } from './settings';
 
 export interface NoteskySettings {
   identifier: string;
@@ -47,6 +48,7 @@ export default class NoteskyPlugin extends Plugin {
 
     this.statusBar = this.addStatusBarItem();
     this.setStatus('idle');
+    this.addSettingTab(new NoteskySettingTab(this.app, this));
 
     this.addCommand({
       id: 'sync-now',
