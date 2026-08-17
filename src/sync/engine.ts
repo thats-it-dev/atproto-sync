@@ -4,6 +4,7 @@ import {
   TOMBSTONE_COLLECTION,
   buildEncryptedAttachment,
   buildEncryptedNote,
+  buildPlaintextAttachment,
   buildPlaintextNote,
   sha256Hex,
 } from '../lexicon/build';
@@ -14,6 +15,7 @@ import {
   decryptAttachmentMeta,
   encryptAttachment,
 } from '../crypto/attachment';
+import { mimeFromPath, resolvePublicAttachments } from '../publish/cascade';
 import { decryptNote, encryptNote } from '../crypto/note';
 import { CasError, PdsClient } from './pds';
 import { IndexEntry, LocalFile, Op, RemoteNote, reconcile } from './reconcile';
@@ -196,6 +198,10 @@ export class SyncEngine {
     const engine = this;
     // Listed records this cycle, for pull-time blob resolution.
     const recordByRkey = new Map<string, AttachmentRecord>();
+    // Public state is derived: an attachment is public iff some public local
+    // note embeds it. Toggling flips the content tag, which triggers a push.
+    let publicPaths = new Set<string>();
+    const isPublic = (contentTag: string) => contentTag.endsWith(':pub');
     return {
       collection: ATTACHMENT_COLLECTION,
 
@@ -214,9 +220,15 @@ export class SyncEngine {
           );
         }
         const skippedSet = new Set(skipped);
-        return all
-          .filter((f) => !skippedSet.has(f.path))
-          .map((f) => ({ path: f.path, content: `${f.hash}:enc` }));
+        const kept = all.filter((f) => !skippedSet.has(f.path));
+        publicPaths = resolvePublicAttachments(
+          await vault.readAll(),
+          kept.map((f) => f.path)
+        );
+        return kept.map((f) => ({
+          path: f.path,
+          content: `${f.hash}:${publicPaths.has(f.path) ? 'pub' : 'enc'}`,
+        }));
       },
 
       async decryptRemote(rec) {
@@ -229,13 +241,21 @@ export class SyncEngine {
         return { path: value.meta.path, content: `${value.contentHash}:pub` };
       },
 
-      async makeRecord(path) {
+      async makeRecord(path, content) {
         const bytes = await vault.readBinary(path);
-        const enc = await encryptAttachment(
-          bytes,
-          { path, mimeType: 'application/octet-stream' },
-          masterKey
-        );
+        const mimeType = mimeFromPath(path);
+        if (isPublic(content)) {
+          const uploaded = await pds.uploadBlob(bytes, mimeType);
+          return buildPlaintextAttachment({
+            vault: engine.opts.vaultRkey,
+            path,
+            mimeType,
+            blob: uploaded.blob,
+            contentHash: await sha256Hex(bytes),
+            updatedAt: engine.nowIso(),
+          });
+        }
+        const enc = await encryptAttachment(bytes, { path, mimeType }, masterKey);
         const uploaded = await pds.uploadBlob(enc.blob, 'application/octet-stream');
         return buildEncryptedAttachment({
           vault: engine.opts.vaultRkey,

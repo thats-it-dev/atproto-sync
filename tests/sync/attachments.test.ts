@@ -92,6 +92,46 @@ describe('attachment sync', () => {
     expect((await pds.listRecords(ATTACHMENT_COLLECTION)).length).toBe(1);
   });
 
+  it('publishes embedded attachments of public notes, re-encrypts when unflagged', async () => {
+    const pds = new FakePds();
+    const a = makeEngine(pds, MASTER);
+    await a.vault.writeBinary('img/chart.png', IMG);
+    await a.vault.write('post.md', '---\nnotesky_public: true\n---\n\n![[img/chart.png]]\n');
+    await a.engine.sync();
+
+    let records = await pds.listRecords(ATTACHMENT_COLLECTION);
+    expect(records.length).toBe(1);
+    let value = records[0].value as { meta: Record<string, unknown>; blob: { ref: { $link: string } } };
+    expect(value.meta.path).toBe('img/chart.png'); // plaintext meta
+    expect(value.meta.mimeType).toBe('image/png');
+    expect(await pds.getBlob(value.blob.ref.$link)).toEqual(IMG); // blob unencrypted
+
+    // Remove the flag: attachment re-encrypts.
+    await a.vault.write('post.md', '\n![[img/chart.png]]\n');
+    await a.engine.sync();
+    records = await pds.listRecords(ATTACHMENT_COLLECTION);
+    expect(records.length).toBe(1);
+    value = records[0].value as typeof value;
+    expect(value.meta.path).toBeUndefined(); // encrypted meta again
+    expect(await pds.getBlob(value.blob.ref.$link)).not.toEqual(IMG);
+  });
+
+  it('an attachment stays public while any public note still embeds it', async () => {
+    const pds = new FakePds();
+    const a = makeEngine(pds, MASTER);
+    await a.vault.writeBinary('shared.png', IMG);
+    await a.vault.write('one.md', '---\nnotesky_public: true\n---\n\n![[shared.png]]\n');
+    await a.vault.write('two.md', '---\nnotesky_public: true\n---\n\n![[shared.png]]\n');
+    await a.engine.sync();
+
+    await a.vault.write('one.md', '\n![[shared.png]]\n'); // one goes private
+    await a.engine.sync();
+    const value = (await pds.listRecords(ATTACHMENT_COLLECTION))[0].value as {
+      meta: Record<string, unknown>;
+    };
+    expect(value.meta.path).toBe('shared.png'); // still public via two.md
+  });
+
   it('oversized files are skipped with a warning and nothing synced', async () => {
     const pds = new FakePds({ blobLimit: 64 });
     const warnings: string[] = [];
