@@ -162,6 +162,11 @@ export function reconcile(
         content: rec.content,
         cid: rec.cid,
       });
+      if (rec.path !== entry.path) {
+        // Remote rename: pulling moves the file, vacating its old path for
+        // any unindexed remote that now lives there.
+        vacatedPaths.add(entry.path);
+      }
     } else {
       // Both changed: three-way merge, CASing against the remote we merged with.
       ops.push({

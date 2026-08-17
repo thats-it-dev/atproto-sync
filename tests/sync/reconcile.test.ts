@@ -150,6 +150,23 @@ describe('reconcile: delete + replacement in one cycle', () => {
   });
 });
 
+describe('reconcile: remote rename + replacement in one cycle', () => {
+  it('pulls an unindexed remote into a path vacated by a remote rename', () => {
+    const ops = reconcile(
+      [file('old.png', 'HASH1')],
+      [
+        note('r1', 'cid-2', 'new.png', 'HASH1'), // renamed remotely, same content
+        note('r2', 'cid-9', 'old.png', 'HASH2'), // new record at the old path
+      ],
+      [entry('old.png', 'r1', 'HASH1', 'cid-1')]
+    );
+    expect(ops).toEqual([
+      { kind: 'pull', path: 'new.png', rkey: 'r1', content: 'HASH1', cid: 'cid-2' },
+      { kind: 'pullCreate', path: 'old.png', rkey: 'r2', content: 'HASH2', cid: 'cid-9' },
+    ]);
+  });
+});
+
 describe('reconcile: creates', () => {
   it('pushCreates a local file with no index entry and no remote at that path', () => {
     const ops = reconcile([file('new.md', 'brand new')], [], []);

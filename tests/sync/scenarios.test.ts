@@ -149,31 +149,54 @@ describe('property: random interleavings converge', () => {
       // Tokens and paths contain '#', which cannot appear in base64/hex/JSON keys,
       // so any '#' in the raw PDS dump is a plaintext leak.
       const paths = ['#p0.md', '#p1.md', '#p2.md', 'dir/#p3.md'];
+      const binPaths = ['#img0.bin', '#img1.bin', 'att/#img2.bin'];
       const writtenTokens = new Set<string>();
+      const writtenBinaries = new Set<string>();
       let tokenCounter = 0;
+      const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 
       const actions = 8 + Math.floor(rand() * 12);
       for (let step = 0; step < actions; step++) {
         const d = pick(devices);
         const roll = rand();
-        if (roll < 0.45) {
-          // edit/create
+        if (roll < 0.35) {
+          // note edit/create
           const token = `#tok-i${iter}-c${tokenCounter++}#`;
           writtenTokens.add(token);
           await d.vault.write(pick(paths), token);
+        } else if (roll < 0.48) {
+          // attachment edit/create with seeded bytes
+          const bytes = Uint8Array.from({ length: 4 + Math.floor(rand() * 8) }, () =>
+            Math.floor(rand() * 256)
+          );
+          writtenBinaries.add(hex(bytes));
+          await d.vault.writeBinary(pick(binPaths), bytes);
         } else if (roll < 0.6) {
-          // delete a random existing file
-          const files = [...d.vault.files.keys()];
-          if (files.length) await d.vault.remove(pick(files));
+          // delete a random existing file (note or attachment)
+          const all = [...d.vault.files.keys(), ...d.vault.binaries.keys()];
+          if (all.length) await d.vault.remove(pick(all));
         } else if (roll < 0.7) {
-          // rename a random existing file to an unused path
-          const files = [...d.vault.files.keys()];
-          const free = paths.filter((p) => !d.vault.files.has(p));
-          if (files.length && free.length) {
-            const from = pick(files);
-            const content = d.vault.files.get(from)!;
-            await d.vault.remove(from);
-            await d.vault.write(pick(free), content);
+          // rename a random existing file to an unused path of its kind
+          if (rand() < 0.5) {
+            const files = [...d.vault.files.keys()];
+            const free = paths.filter((p) => !d.vault.files.has(p));
+            if (files.length && free.length) {
+              const from = pick(files);
+              const content = d.vault.files.get(from)!;
+              await d.vault.remove(from);
+              await d.vault.write(pick(free), content);
+            }
+          } else {
+            const bins = [...d.vault.binaries.keys()].filter(
+              (p) => !p.startsWith('Notesky Conflicts/')
+            );
+            const free = binPaths.filter((p) => !d.vault.binaries.has(p));
+            if (bins.length && free.length) {
+              const from = pick(bins);
+              const bytes = d.vault.binaries.get(from)!;
+              await d.vault.remove(from);
+              await d.vault.writeBinary(pick(free), bytes);
+            }
           }
         } else {
           await d.engine.sync();
@@ -185,14 +208,18 @@ describe('property: random interleavings converge', () => {
         for (const d of devices) await d.engine.sync();
       }
 
-      // Invariant 1: all vaults identical (the conflicts stash is
-      // device-local by design, so it sits outside the comparison).
+      // Invariant 1: all vaults identical — notes and binaries (the conflicts
+      // stash is device-local by design, so it sits outside the comparison).
       const dumps = devices.map((d) =>
-        JSON.stringify(
+        JSON.stringify([
           [...d.vault.files.entries()]
             .filter(([p]) => !p.startsWith('Notesky Conflicts/'))
-            .sort((x, y) => x[0].localeCompare(y[0]))
-        )
+            .sort((x, y) => x[0].localeCompare(y[0])),
+          [...d.vault.binaries.entries()]
+            .filter(([p]) => !p.startsWith('Notesky Conflicts/'))
+            .map(([p, b]) => [p, hex(b)])
+            .sort((x, y) => x[0].localeCompare(y[0])),
+        ])
       );
       for (const dump of dumps.slice(1)) {
         expect(dump, `seed ${1000 + iter}: vaults diverged`).toBe(dumps[0]);
@@ -201,6 +228,7 @@ describe('property: random interleavings converge', () => {
       // Invariant 2: no plaintext at rest ('#' cannot occur in encrypted records).
       const raw = JSON.stringify([
         await pds.listRecords('app.notesky.note'),
+        await pds.listRecords('app.notesky.attachment'),
         await pds.listRecords('app.notesky.tombstone'),
       ]);
       expect(raw.includes('#'), `seed ${1000 + iter}: plaintext leaked to PDS`).toBe(false);
@@ -215,6 +243,16 @@ describe('property: random interleavings converge', () => {
             `seed ${1000 + iter}: invented token ${tok} in ${path}`
           ).toBe(true);
         }
+      }
+
+      // Invariant 4: binaries never merge, so every surviving binary must be
+      // byte-identical to something some device actually wrote.
+      for (const [path, bytes] of devices[0].vault.binaries) {
+        if (path.startsWith('Notesky Conflicts/')) continue;
+        expect(
+          writtenBinaries.has(hex(bytes)),
+          `seed ${1000 + iter}: invented bytes in ${path}`
+        ).toBe(true);
       }
     }
   }, 120_000);
