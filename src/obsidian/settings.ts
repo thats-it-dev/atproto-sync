@@ -40,6 +40,16 @@ export class NoteskySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName('PDS URL (advanced)')
+      .setDesc('Leave empty to auto-detect from your handle. Set for self-hosted or local testing, e.g. http://localhost:3000.')
+      .addText((t) =>
+        t.setPlaceholder('auto').setValue(s.pdsUrlOverride).onChange(async (v) => {
+          s.pdsUrlOverride = v.trim();
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
       .setName('App password')
       .setDesc('Create one in your PDS account settings — not your main password.')
       .addText((t) => {
@@ -55,6 +65,7 @@ export class NoteskySettingTab extends PluginSettingTab {
             this.plugin.pdsClient = await login({
               identifier: s.identifier,
               password: s.appPassword,
+              pdsUrl: s.pdsUrlOverride || undefined,
             });
             new Notice('Notesky: login OK');
           } catch (err) {
@@ -181,7 +192,11 @@ export class NoteskySettingTab extends PluginSettingTab {
     }
     if (!this.plugin.pdsClient) {
       try {
-        this.plugin.pdsClient = await login({ identifier: s.identifier, password: s.appPassword });
+        this.plugin.pdsClient = await login({
+          identifier: s.identifier,
+          password: s.appPassword,
+          pdsUrl: s.pdsUrlOverride || undefined,
+        });
       } catch (err) {
         new Notice(`Notesky: log in first — ${err instanceof Error ? err.message : err}`);
         return;

@@ -10,6 +10,8 @@ import { registerPublishCommands } from './publish';
 export interface NoteskySettings {
   identifier: string;
   appPassword: string;
+  /** Direct PDS URL, skipping handle resolution (self-hosted / local testing). */
+  pdsUrlOverride: string;
   /** rkey of the app.notesky.vault record; set during onboarding. */
   vaultRkey: string;
   /** Cached master key (base64, device-local); set after passphrase entry. */
@@ -22,6 +24,7 @@ export interface NoteskySettings {
 export const DEFAULT_SETTINGS: NoteskySettings = {
   identifier: '',
   appPassword: '',
+  pdsUrlOverride: '',
   vaultRkey: '',
   masterKeyB64: '',
   syncIntervalMinutes: 5,
@@ -84,7 +87,11 @@ export default class NoteskyPlugin extends Plugin {
       return; // not onboarded yet; settings tab drives setup
     }
     try {
-      this.pdsClient = await login({ identifier: s.identifier, password: s.appPassword });
+      this.pdsClient = await login({
+        identifier: s.identifier,
+        password: s.appPassword,
+        pdsUrl: s.pdsUrlOverride || undefined,
+      });
       let progressNotice: Notice | null = null;
       this.engine = new SyncEngine({
         pds: this.pdsClient,
