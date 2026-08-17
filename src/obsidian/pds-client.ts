@@ -34,6 +34,23 @@ export class RealPdsClient implements PdsClient {
     value: unknown,
     swapCid?: string | null
   ): Promise<{ cid: string }> {
+    // swapCid === null means must-not-exist. The reference PDS does not
+    // enforce that through putRecord (the null swap never takes effect), so
+    // creates go through createRecord, which does reject duplicates.
+    if (swapCid === null) {
+      try {
+        const res = await this.agent.com.atproto.repo.createRecord({
+          repo: this.did,
+          collection,
+          rkey,
+          record: value as Record<string, unknown>,
+          validate: false,
+        });
+        return { cid: res.data.cid };
+      } catch (err) {
+        throw await this.mapCreateError(err, collection, [rkey]);
+      }
+    }
     try {
       const res = await this.agent.com.atproto.repo.putRecord({
         repo: this.did,
@@ -51,6 +68,30 @@ export class RealPdsClient implements PdsClient {
       }
       throw mapPdsError(err);
     }
+  }
+
+  /**
+   * The PDS reports a duplicate create as an untyped 500, so on failure we
+   * check whether any of the target records exists to tell a CAS collision
+   * apart from a genuine server error.
+   */
+  private async mapCreateError(
+    err: unknown,
+    collection: string,
+    rkeys: string[]
+  ): Promise<unknown> {
+    if (err instanceof XRPCError) {
+      for (const rkey of rkeys) {
+        try {
+          if (await this.getRecord(collection, rkey)) {
+            return new CasError(`record ${collection}/${rkey} already exists`);
+          }
+        } catch {
+          break; // can't verify; fall through to the original error
+        }
+      }
+    }
+    return mapPdsError(err);
   }
 
   /** Atomic batch create via com.atproto.repo.applyWrites. */
@@ -80,12 +121,11 @@ export class RealPdsClient implements PdsClient {
       if (err instanceof ComAtprotoRepoApplyWrites.InvalidSwapError) {
         throw new CasError(err.message);
       }
-      // A create colliding with an existing record surfaces as a generic
-      // InvalidRequest; treat it as a CAS failure so the engine re-runs.
-      if (err instanceof XRPCError && /already exists|duplicate/i.test(err.message)) {
-        throw new CasError(err.message);
-      }
-      throw mapPdsError(err);
+      throw await this.mapCreateError(
+        err,
+        writes[0]?.collection ?? '',
+        writes.map((w) => w.rkey)
+      );
     }
   }
 

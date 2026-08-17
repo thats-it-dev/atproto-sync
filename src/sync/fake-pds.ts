@@ -1,6 +1,11 @@
 import { CasError, PdsClient } from './pds';
 
-/** In-memory PdsClient with real CAS semantics. Fake cids are just unique strings. */
+/**
+ * In-memory PdsClient with real CAS semantics. Fake cids are just unique
+ * strings; real cids are content-addressed, so an identical put keeps its cid
+ * there. The engine never re-puts identical bytes (fresh nonces every
+ * encryption), so the difference doesn't affect sync behavior.
+ */
 export class FakePds implements PdsClient {
   private collections = new Map<string, Map<string, { cid: string; value: unknown }>>();
   private cidCounter = 0;

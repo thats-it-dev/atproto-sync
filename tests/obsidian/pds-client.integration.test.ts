@@ -41,8 +41,11 @@ describe.skipIf(!url || !handle || !password)('RealPdsClient against a live PDS'
     // get
     const got = await client.getRecord(COLLECTION, rkey);
     expect(got?.cid).toBe(cid1);
-    // CAS update with current cid
-    const { cid: cid2 } = await client.putRecord(COLLECTION, rkey, record, cid1);
+    // CAS update with current cid. Content must differ: CIDs are
+    // content-addressed, so an identical record keeps the same cid. (The
+    // engine always pushes fresh ciphertext, so cids change in practice.)
+    const record2 = { ...record, contentHash: '1'.repeat(64) };
+    const { cid: cid2 } = await client.putRecord(COLLECTION, rkey, record2, cid1);
     expect(cid2).not.toBe(cid1);
     // CAS update with stale cid must fail
     await expect(client.putRecord(COLLECTION, rkey, record, cid1)).rejects.toThrow(CasError);
