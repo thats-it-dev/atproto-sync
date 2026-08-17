@@ -1,10 +1,12 @@
 import { SyncEngine, VaultAdapter, IndexStore, SyncEngineOptions } from '../../src/sync/engine';
+import { sha256Hex } from '../../src/lexicon/build';
 import type { IndexEntry } from '../../src/sync/reconcile';
 import type { PdsClient } from '../../src/sync/pds';
 
 /** In-memory VaultAdapter for tests, with a read helper. */
 export class FakeVault implements VaultAdapter {
   files = new Map<string, string>();
+  binaries = new Map<string, Uint8Array>();
 
   async readAll(): Promise<Array<{ path: string; content: string }>> {
     return [...this.files.entries()].map(([path, content]) => ({ path, content }));
@@ -16,10 +18,29 @@ export class FakeVault implements VaultAdapter {
 
   async remove(path: string): Promise<void> {
     this.files.delete(path);
+    this.binaries.delete(path);
   }
 
   async read(path: string): Promise<string | undefined> {
     return this.files.get(path);
+  }
+
+  async readAllAttachments(): Promise<Array<{ path: string; hash: string; size: number }>> {
+    const out: Array<{ path: string; hash: string; size: number }> = [];
+    for (const [path, bytes] of this.binaries) {
+      out.push({ path, hash: await sha256Hex(bytes), size: bytes.length });
+    }
+    return out;
+  }
+
+  async readBinary(path: string): Promise<Uint8Array> {
+    const bytes = this.binaries.get(path);
+    if (!bytes) throw new Error(`no binary at ${path}`);
+    return bytes.slice();
+  }
+
+  async writeBinary(path: string, bytes: Uint8Array): Promise<void> {
+    this.binaries.set(path, bytes.slice());
   }
 }
 

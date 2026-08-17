@@ -23,6 +23,8 @@ export interface IndexEntry {
   baseContent: string;
   /** Remote cid seen at last sync. */
   lastCid: string;
+  /** Owning collection; absent on legacy entries (implies app.notesky.note). */
+  collection?: string;
 }
 
 export type Op =

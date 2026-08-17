@@ -1,11 +1,19 @@
 import {
+  ATTACHMENT_COLLECTION,
   NOTE_COLLECTION,
   TOMBSTONE_COLLECTION,
+  buildEncryptedAttachment,
   buildEncryptedNote,
   buildPlaintextNote,
+  sha256Hex,
 } from '../lexicon/build';
 import { getPublicSlug, isPublicNote } from '../publish/frontmatter';
-import type { NoteRecord, TombstoneRecord } from '../lexicon/types';
+import type { AttachmentRecord, NoteRecord, TombstoneRecord } from '../lexicon/types';
+import {
+  decryptAttachmentBlob,
+  decryptAttachmentMeta,
+  encryptAttachment,
+} from '../crypto/attachment';
 import { decryptNote, encryptNote } from '../crypto/note';
 import { CasError, PdsClient } from './pds';
 import { IndexEntry, LocalFile, Op, RemoteNote, reconcile } from './reconcile';
@@ -15,6 +23,10 @@ export interface VaultAdapter {
   readAll(): Promise<LocalFile[]>;
   write(path: string, content: string): Promise<void>;
   remove(path: string): Promise<void>;
+  /** All non-markdown files: path + plaintext sha256 + size (adapters may cache hashes). */
+  readAllAttachments(): Promise<Array<{ path: string; hash: string; size: number }>>;
+  readBinary(path: string): Promise<Uint8Array>;
+  writeBinary(path: string, bytes: Uint8Array): Promise<void>;
 }
 
 export interface IndexStore {
@@ -62,6 +74,15 @@ function generateRkey(): string {
 
 type ListedRecord = { rkey: string; cid: string; value: unknown };
 type MergeOp = Extract<Op, { kind: 'merge' }>;
+
+/** Cid string out of a BlobRef, whether lex-parsed (CID instance) or raw JSON ({$link}). */
+function blobRefString(blob: unknown): string {
+  const ref = (blob as { ref?: unknown })?.ref;
+  if (!ref) throw new Error('attachment record has no blob ref');
+  if (typeof ref === 'string') return ref;
+  const link = (ref as { $link?: string }).$link;
+  return link ?? String(ref);
+}
 
 /**
  * What differs per synced collection (notes vs attachments). The shared
@@ -170,10 +191,116 @@ export class SyncEngine {
     };
   }
 
+  private attachmentsStrategy(): CollectionStrategy {
+    const { pds, vault, masterKey } = this.opts;
+    const engine = this;
+    // Listed records this cycle, for pull-time blob resolution.
+    const recordByRkey = new Map<string, AttachmentRecord>();
+    return {
+      collection: ATTACHMENT_COLLECTION,
+
+      async listLocal() {
+        const limit = await pds.getBlobLimit();
+        const all = (await vault.readAllAttachments()).filter(
+          (f) => !f.path.startsWith(`${CONFLICTS_FOLDER}/`)
+        );
+        // Encrypted blob = plaintext + 16-byte MAC.
+        const skipped = all.filter((f) => f.size + 16 > limit).map((f) => f.path).sort();
+        engine.lastSkippedPaths = skipped;
+        if (skipped.length > 0) {
+          engine.opts.onWarning?.(
+            `${skipped.length} file(s) too large for your PDS to store, not synced: ` +
+              skipped.join(', ')
+          );
+        }
+        const skippedSet = new Set(skipped);
+        return all
+          .filter((f) => !skippedSet.has(f.path))
+          .map((f) => ({ path: f.path, content: `${f.hash}:enc` }));
+      },
+
+      async decryptRemote(rec) {
+        const value = rec.value as AttachmentRecord;
+        recordByRkey.set(rec.rkey, value);
+        if ('ciphertext' in value.meta) {
+          const meta = await decryptAttachmentMeta(value.meta, masterKey);
+          return { path: meta.path, content: `${meta.hash}:enc` };
+        }
+        return { path: value.meta.path, content: `${value.contentHash}:pub` };
+      },
+
+      async makeRecord(path) {
+        const bytes = await vault.readBinary(path);
+        const enc = await encryptAttachment(
+          bytes,
+          { path, mimeType: 'application/octet-stream' },
+          masterKey
+        );
+        const uploaded = await pds.uploadBlob(enc.blob, 'application/octet-stream');
+        return buildEncryptedAttachment({
+          vault: engine.opts.vaultRkey,
+          meta: enc.meta,
+          blob: uploaded.blob,
+          updatedAt: engine.nowIso(),
+        });
+      },
+
+      async applyPull(path, _content, rkey) {
+        const value = recordByRkey.get(rkey);
+        if (!value) throw new Error(`no listed attachment record for ${rkey}`);
+        const blobBytes = await pds.getBlob(blobRefString(value.blob));
+        const bytes =
+          'ciphertext' in value.meta
+            ? await decryptAttachmentBlob(value.meta, blobBytes, masterKey)
+            : blobBytes;
+        await vault.writeBinary(path, bytes);
+      },
+
+      async resolveMerge(op) {
+        // Binaries cannot merge: remote stands, local bytes are stashed.
+        const bytes = await vault.readBinary(op.path);
+        await vault.writeBinary(engine.stashPath(op.path), bytes);
+        engine.opts.onWarning?.(
+          `"${op.path}" was changed on two devices. The other device's version won; ` +
+            `yours is saved in "${CONFLICTS_FOLDER}".`
+        );
+        return { accept: true };
+      },
+
+      async removeLocal(path) {
+        await vault.remove(path);
+      },
+
+      unreadableWarning(count) {
+        return (
+          `${count} attachment record(s) could not be decrypted and were skipped. ` +
+          'Check that every device uses the same passphrase.'
+        );
+      },
+    };
+  }
+
+  /** Oversized paths found by the most recent sync (visible in settings). */
+  lastSkippedPaths: string[] = [];
+
   /** Returns true if a CAS conflict made the cycle dirty. */
   private async syncOnce(): Promise<boolean> {
-    const entries = await this.opts.index.load();
-    return this.syncCollection(this.notesStrategy(), entries, []);
+    const forCollection = (entries: IndexEntry[], collection: string) =>
+      entries.filter((e) => (e.collection ?? NOTE_COLLECTION) === collection);
+
+    let entries = await this.opts.index.load();
+    const notesDirty = await this.syncCollection(
+      this.notesStrategy(),
+      forCollection(entries, NOTE_COLLECTION),
+      forCollection(entries, ATTACHMENT_COLLECTION)
+    );
+    entries = await this.opts.index.load(); // notes pass may have saved
+    const attachmentsDirty = await this.syncCollection(
+      this.attachmentsStrategy(),
+      forCollection(entries, ATTACHMENT_COLLECTION),
+      forCollection(entries, NOTE_COLLECTION)
+    );
+    return notesDirty || attachmentsDirty;
   }
 
   /**
@@ -195,7 +322,7 @@ export class SyncEngine {
       for (const [rkey, e] of indexByRkey) {
         if (e.path === entry.path && rkey !== entry.rkey) indexByRkey.delete(rkey);
       }
-      indexByRkey.set(entry.rkey, entry);
+      indexByRkey.set(entry.rkey, { ...entry, collection: strategy.collection });
     };
     const local = await strategy.listLocal();
 
