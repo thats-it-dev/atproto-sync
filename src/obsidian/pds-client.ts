@@ -6,7 +6,9 @@ import {
   ComAtprotoRepoPutRecord,
   XRPCError,
 } from '@atproto/api';
-import { CasError, PdsClient } from '../sync/pds';
+import { BlobTooLargeError, CasError, PdsClient } from '../sync/pds';
+
+const DEFAULT_BLOB_LIMIT = 5 * 1024 * 1024; // reference PDS default
 
 /** Translate PDS transport errors into messages a user can act on. */
 function mapPdsError(err: unknown): unknown {
@@ -127,6 +129,42 @@ export class RealPdsClient implements PdsClient {
         writes.map((w) => w.rkey)
       );
     }
+  }
+
+  async uploadBlob(bytes: Uint8Array, mimeType: string): Promise<{ blob: unknown; ref: string }> {
+    try {
+      const res = await this.agent.uploadBlob(bytes, { encoding: mimeType });
+      return { blob: res.data.blob, ref: res.data.blob.ref.toString() };
+    } catch (err) {
+      if (
+        err instanceof XRPCError &&
+        ((err.status as number) === 413 || /too large|blob.*size|payload/i.test(err.message))
+      ) {
+        throw new BlobTooLargeError(err.message);
+      }
+      throw mapPdsError(err);
+    }
+  }
+
+  async getBlob(ref: string): Promise<Uint8Array> {
+    try {
+      const res = await this.agent.com.atproto.sync.getBlob({ did: this.did, cid: ref });
+      return new Uint8Array(res.data);
+    } catch (err) {
+      throw mapPdsError(err);
+    }
+  }
+
+  async getBlobLimit(): Promise<number> {
+    try {
+      const res = await this.agent.com.atproto.server.describeServer();
+      // Not part of the published schema today; honor it if a host reports it.
+      const reported = (res.data as { blobUploadLimit?: unknown }).blobUploadLimit;
+      if (typeof reported === 'number' && reported > 0) return reported;
+    } catch {
+      // fall through to the default
+    }
+    return DEFAULT_BLOB_LIMIT;
   }
 
   async getRecord(

@@ -20,6 +20,22 @@ export interface PdsClient {
   applyCreates?(
     writes: Array<{ collection: string; rkey: string; value: unknown }>
   ): Promise<Array<{ cid: string }>>;
+  /**
+   * Upload bytes as a blob. `blob` is the opaque BlobRef to embed verbatim in
+   * a record (what keeps the blob referenced); `ref` is the cid string for
+   * getBlob.
+   */
+  uploadBlob(bytes: Uint8Array, mimeType: string): Promise<{ blob: unknown; ref: string }>;
+  getBlob(ref: string): Promise<Uint8Array>;
+  /** Max blob size in bytes accepted by this host. */
+  getBlobLimit(): Promise<number>;
+}
+
+export class BlobTooLargeError extends Error {
+  constructor(message = 'blob exceeds the host size limit') {
+    super(message);
+    this.name = 'BlobTooLargeError';
+  }
 }
 
 export class CasError extends Error {

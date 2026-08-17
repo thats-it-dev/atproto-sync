@@ -1,4 +1,11 @@
-import { CasError, PdsClient } from './pds';
+import { BlobTooLargeError, CasError, PdsClient } from './pds';
+
+async function sha256HexOf(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 /**
  * In-memory PdsClient with real CAS semantics. Fake cids are just unique
@@ -9,6 +16,34 @@ import { CasError, PdsClient } from './pds';
 export class FakePds implements PdsClient {
   private collections = new Map<string, Map<string, { cid: string; value: unknown }>>();
   private cidCounter = 0;
+  private blobs = new Map<string, Uint8Array>();
+  private readonly blobLimit: number;
+
+  constructor(options: { blobLimit?: number } = {}) {
+    this.blobLimit = options.blobLimit ?? 16 * 1024 * 1024;
+  }
+
+  async uploadBlob(bytes: Uint8Array, mimeType: string): Promise<{ blob: unknown; ref: string }> {
+    if (bytes.length > this.blobLimit) {
+      throw new BlobTooLargeError(`blob of ${bytes.length} bytes exceeds limit ${this.blobLimit}`);
+    }
+    const ref = await sha256HexOf(bytes);
+    this.blobs.set(ref, bytes.slice());
+    return {
+      blob: { $type: 'blob', ref: { $link: ref }, mimeType, size: bytes.length },
+      ref,
+    };
+  }
+
+  async getBlob(ref: string): Promise<Uint8Array> {
+    const bytes = this.blobs.get(ref);
+    if (!bytes) throw new Error(`blob not found: ${ref}`);
+    return bytes.slice();
+  }
+
+  async getBlobLimit(): Promise<number> {
+    return this.blobLimit;
+  }
 
   private nextCid(): string {
     return `cid-${++this.cidCounter}`;

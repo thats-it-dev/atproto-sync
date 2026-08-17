@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CasError } from '../../src/sync/pds';
+import { BlobTooLargeError, CasError } from '../../src/sync/pds';
 import { FakePds } from '../../src/sync/fake-pds';
 
 describe('FakePds', () => {
@@ -48,6 +48,27 @@ describe('FakePds', () => {
     const pds = new FakePds();
     const { cid } = await pds.putRecord('c', 'k', { v: 1 }, null);
     expect(cid).toBeTruthy();
+  });
+
+  it('uploads and downloads blobs, content-addressed', async () => {
+    const pds = new FakePds();
+    const bytes = new Uint8Array([9, 8, 7, 6]);
+    const a = await pds.uploadBlob(bytes, 'application/octet-stream');
+    const b = await pds.uploadBlob(bytes, 'application/octet-stream');
+    expect(a.ref).toBe(b.ref); // identical bytes → identical ref (dedup)
+    expect(a.blob).toBeTruthy();
+    expect(await pds.getBlob(a.ref)).toEqual(bytes);
+    const other = await pds.uploadBlob(new Uint8Array([1]), 'application/octet-stream');
+    expect(other.ref).not.toBe(a.ref);
+  });
+
+  it('enforces the configured blob size limit', async () => {
+    const pds = new FakePds({ blobLimit: 8 });
+    expect(await pds.getBlobLimit()).toBe(8);
+    await pds.uploadBlob(new Uint8Array(8), 'application/octet-stream'); // at limit: ok
+    await expect(
+      pds.uploadBlob(new Uint8Array(9), 'application/octet-stream')
+    ).rejects.toThrow(BlobTooLargeError);
   });
 
   it('applyCreates writes a batch atomically and returns cids in order', async () => {
