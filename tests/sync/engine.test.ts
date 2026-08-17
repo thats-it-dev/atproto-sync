@@ -150,6 +150,38 @@ describe('SyncEngine', () => {
     void good;
   });
 
+  it('stashes the local version device-locally when a merge patch fails', async () => {
+    const pds = new FakePds();
+    const master = new Uint8Array(32).fill(3);
+    const warnings: string[] = [];
+    const a = makeEngine(pds, master, { onWarning: (m) => warnings.push(m) });
+    const b = makeEngine(pds, master);
+    await a.vault.write('essay.md', 'alpha beta gamma delta\n');
+    await a.engine.sync();
+    await b.engine.sync();
+
+    await a.vault.write('essay.md', 'alpha beta GAMMA delta\n'); // small local edit
+    await b.vault.write('essay.md', 'completely rewritten text that shares nothing at all\n');
+    await b.engine.sync();
+    await a.engine.sync(); // A's patch cannot apply
+
+    // Remote's rewrite stands; A's version is stashed locally with a warning.
+    expect(await a.vault.read('essay.md')).toBe(
+      'completely rewritten text that shares nothing at all\n'
+    );
+    const stashPaths = [...a.vault.files.keys()].filter((p) => p.startsWith('Notesky Conflicts/'));
+    expect(stashPaths).toHaveLength(1);
+    expect(stashPaths[0]).toContain('essay');
+    expect(await a.vault.read(stashPaths[0])).toBe('alpha beta GAMMA delta\n');
+    expect(warnings.some((w) => w.includes('essay.md'))).toBe(true);
+
+    // The stash never syncs: no extra records, and B never sees it.
+    await a.engine.sync();
+    await b.engine.sync();
+    expect((await pds.listRecords('app.notesky.note')).length).toBe(1);
+    expect([...b.vault.files.keys()].some((p) => p.startsWith('Notesky Conflicts/'))).toBe(false);
+  });
+
   it('round-trips a public note to another device unchanged', async () => {
     const pds = new FakePds();
     const master = new Uint8Array(32).fill(3);

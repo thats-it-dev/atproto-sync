@@ -22,7 +22,8 @@ export interface IndexStore {
   save(entries: IndexEntry[]): Promise<void>;
 }
 
-export type ConflictMode = 'auto' | 'conflict-file';
+/** Losing merge content is stashed here; device-local, never reconciled. */
+export const CONFLICTS_FOLDER = 'Notesky Conflicts';
 
 export interface SyncEngineOptions {
   pds: PdsClient;
@@ -31,7 +32,6 @@ export interface SyncEngineOptions {
   masterKey: Uint8Array;
   /** rkey of this vault's app.notesky.vault record. */
   vaultRkey: string;
-  conflictMode?: ConflictMode;
   now?: () => string;
   /** Override rkey generation (tests use a deterministic counter). */
   rkeyGen?: () => string;
@@ -61,10 +61,10 @@ function generateRkey(): string {
 }
 
 export class SyncEngine {
-  private readonly opts: Required<Pick<SyncEngineOptions, 'conflictMode'>> & SyncEngineOptions;
+  private readonly opts: SyncEngineOptions;
 
   constructor(options: SyncEngineOptions) {
-    this.opts = { conflictMode: 'auto', ...options };
+    this.opts = options;
   }
 
   async sync(): Promise<void> {
@@ -97,7 +97,11 @@ export class SyncEngine {
       }
       indexByRkey.set(entry.rkey, entry);
     };
-    const local = await vault.readAll();
+    // The conflicts stash is device-local by construction: whatever the
+    // adapter or ignore settings say, it never enters reconciliation.
+    const local = (await vault.readAll()).filter(
+      (f) => !f.path.startsWith(`${CONFLICTS_FOLDER}/`)
+    );
 
     // Only this vault's records take part; other vaults on the same account
     // (or stale test data) are invisible.
@@ -264,18 +268,16 @@ export class SyncEngine {
           }
           case 'merge': {
             const r = merge3(op.base, op.local, op.remote);
-            if (!r.clean && this.opts.conflictMode === 'conflict-file') {
-              // Remote wins in place; the local version survives as a conflict copy.
-              const conflictPath = op.path.replace(/(\.md)?$/i, (ext) => ` (conflict)${ext}`);
-              await vault.write(conflictPath, op.local);
-              await vault.write(op.path, op.remote);
-              setEntry({
-                path: op.path,
-                rkey: op.rkey,
-                baseContent: op.remote,
-                lastCid: op.swapCid,
-              });
-              break;
+            if (!r.clean) {
+              // Some local edits could not be applied: stash the full local
+              // version on this device so nothing is lost, and say so.
+              const basename = op.path.split('/').pop() ?? op.path;
+              const stamp = this.nowIso().slice(0, 19).replace('T', ' ').replaceAll(':', '.');
+              await vault.write(`${CONFLICTS_FOLDER}/${stamp} ${basename}`, op.local);
+              this.opts.onWarning?.(
+                `Conflicting edits in "${op.path}" could not be fully merged. ` +
+                  `Your version is saved in "${CONFLICTS_FOLDER}".`
+              );
             }
             const { cid } = await pds.putRecord(
               NOTE_COLLECTION,

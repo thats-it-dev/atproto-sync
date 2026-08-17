@@ -26,21 +26,23 @@ describe('two-device scenarios', () => {
     expect(await b.vault.read('note.md')).toBe(merged);
   });
 
-  it("conflict-file mode: remote wins in place, local lands in 'note (conflict).md'", async () => {
+  it('same-line edits from two devices both survive the char-level merge', async () => {
     const pds = new FakePds();
-    const a = makeEngine(pds, MASTER, { conflictMode: 'conflict-file' });
+    const a = makeEngine(pds, MASTER);
     const b = makeEngine(pds, MASTER);
-    await a.vault.write('note.md', 'base\n');
+    await a.vault.write('note.md', 'The quick brown fox jumps over the lazy dog.\n');
     await a.engine.sync();
     await b.engine.sync();
 
-    await a.vault.write('note.md', 'local version\n');
-    await b.vault.write('note.md', 'remote version\n');
+    await a.vault.write('note.md', 'The very quick brown fox jumps over the lazy dog.\n');
+    await b.vault.write('note.md', 'The quick brown fox jumps over the sleepy dog.\n');
     await b.engine.sync();
     await a.engine.sync();
+    await b.engine.sync();
 
-    expect(await a.vault.read('note.md')).toBe('remote version\n');
-    expect(await a.vault.read('note (conflict).md')).toBe('local version\n');
+    const merged = 'The very quick brown fox jumps over the sleepy dog.\n';
+    expect(await a.vault.read('note.md')).toBe(merged);
+    expect(await b.vault.read('note.md')).toBe(merged);
   });
 
   it('delete vs edit race: the note survives everywhere with the edit', async () => {
@@ -135,8 +137,6 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-const CONFLICT_MARKER = /^(<{7}|={7}|>{7})/;
-
 describe('property: random interleavings converge', () => {
   it('200 seeded iterations: convergence, encryption at rest, nothing invented', async () => {
     for (let iter = 0; iter < 200; iter++) {
@@ -185,9 +185,14 @@ describe('property: random interleavings converge', () => {
         for (const d of devices) await d.engine.sync();
       }
 
-      // Invariant 1: all vaults identical.
+      // Invariant 1: all vaults identical (the conflicts stash is
+      // device-local by design, so it sits outside the comparison).
       const dumps = devices.map((d) =>
-        JSON.stringify([...d.vault.files.entries()].sort((x, y) => x[0].localeCompare(y[0])))
+        JSON.stringify(
+          [...d.vault.files.entries()]
+            .filter(([p]) => !p.startsWith('Notesky Conflicts/'))
+            .sort((x, y) => x[0].localeCompare(y[0]))
+        )
       );
       for (const dump of dumps.slice(1)) {
         expect(dump, `seed ${1000 + iter}: vaults diverged`).toBe(dumps[0]);
@@ -200,12 +205,15 @@ describe('property: random interleavings converge', () => {
       ]);
       expect(raw.includes('#'), `seed ${1000 + iter}: plaintext leaked to PDS`).toBe(false);
 
-      // Invariant 3: nothing invented — every surviving line is a written token,
-      // a conflict marker, or empty.
+      // Invariant 3: nothing invented — every complete token in a surviving
+      // file was actually written by some device. (Char-level merging can
+      // splice within a line, so line identity is no longer guaranteed.)
       for (const [path, content] of devices[0].vault.files) {
-        for (const line of content.split('\n')) {
-          const ok = line === '' || CONFLICT_MARKER.test(line) || writtenTokens.has(line);
-          expect(ok, `seed ${1000 + iter}: invented line ${JSON.stringify(line)} in ${path}`).toBe(true);
+        for (const tok of content.match(/#tok-i\d+-c\d+#/g) ?? []) {
+          expect(
+            writtenTokens.has(tok),
+            `seed ${1000 + iter}: invented token ${tok} in ${path}`
+          ).toBe(true);
         }
       }
     }

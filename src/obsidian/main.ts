@@ -1,5 +1,5 @@
 import { Notice, Plugin } from 'obsidian';
-import { ConflictMode, SyncEngine } from '../sync/engine';
+import { SyncEngine } from '../sync/engine';
 import { fromB64 } from '../crypto/box';
 import { IndexedDbStore } from './store';
 import { ObsidianVaultAdapter } from './vault-adapter';
@@ -18,7 +18,6 @@ export interface NoteskySettings {
   masterKeyB64: string;
   syncIntervalMinutes: number;
   ignorePatterns: string[];
-  conflictMode: ConflictMode;
 }
 
 export const DEFAULT_SETTINGS: NoteskySettings = {
@@ -29,7 +28,6 @@ export const DEFAULT_SETTINGS: NoteskySettings = {
   masterKeyB64: '',
   syncIntervalMinutes: 5,
   ignorePatterns: [],
-  conflictMode: 'auto',
 };
 
 const DEBOUNCE_MS = 2000;
@@ -99,7 +97,6 @@ export default class NoteskyPlugin extends Plugin {
         index: this.store,
         masterKey: await fromB64(s.masterKeyB64),
         vaultRkey: s.vaultRkey,
-        conflictMode: s.conflictMode,
         interBatchDelayMs: 300,
         onWarning: (msg) => new Notice(`Notesky: ${msg}`, 10_000),
         onProgress: (done, total) => {

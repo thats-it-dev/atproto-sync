@@ -89,10 +89,14 @@ palette → "Notesky Sync: Sync now" to force either side.
 - **Edit** it in vault-b → edit arrives in vault-a.
 - **Rename** it in vault-a → file moves in vault-b.
 - **Delete** it in vault-b → disappears from vault-a.
-- **Conflict:** with both vaults synced, edit the *same line* of the same note
-  in both **before** syncing either; sync both. Default mode: conflict markers
-  in the file. Switch vault-a to `conflict-file` mode and repeat: vault-a keeps
-  the remote version and writes `<name> (conflict).md`.
+- **Conflict (compatible):** with both vaults synced, edit the *start* of a
+  sentence in vault-a and the *end* of the same sentence in vault-b before
+  syncing either; sync both. Both edits should survive in one merged sentence —
+  no markers, no copies, no notice.
+- **Conflict (collision):** make a small edit in vault-a while completely
+  rewriting the whole note in vault-b; sync b, then a. Vault-a should end up
+  with b's rewrite, show a notice, and hold vault-a's version under
+  `Notesky Conflicts/`. That folder must never appear in vault-b.
 - **Kill mid-sync:** put ~200 notes in vault-a (script them), quit Obsidian
   (Cmd-Q) while the progress notice is up, reopen → sync resumes and completes;
   spot-check no duplicate or missing notes in vault-b afterwards.

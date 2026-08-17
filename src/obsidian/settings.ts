@@ -4,7 +4,6 @@ import type { VaultRecord } from '../lexicon/types';
 import { fromB64, toB64 } from '../crypto/box';
 import { makeCheckValue, verifyCheckValue } from '../crypto/check';
 import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '../crypto/keys';
-import type { ConflictMode } from '../sync/engine';
 import { login } from './pds-client';
 import type NoteskyPlugin from './main';
 
@@ -134,20 +133,6 @@ export class NoteskySettingTab extends PluginSettingTab {
             .filter(Boolean);
           await this.plugin.saveSettings();
         })
-      );
-
-    new Setting(containerEl)
-      .setName('Conflict handling')
-      .setDesc('auto: merge with conflict markers. conflict-file: keep both copies.')
-      .addDropdown((d) =>
-        d
-          .addOption('auto', 'Merge automatically')
-          .addOption('conflict-file', 'Create conflict file')
-          .setValue(s.conflictMode)
-          .onChange(async (v) => {
-            s.conflictMode = v as ConflictMode;
-            await this.plugin.saveSettings();
-          })
       );
 
     // ── Danger zone ────────────────────────────────────────────────────────
