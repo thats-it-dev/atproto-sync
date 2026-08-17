@@ -78,16 +78,6 @@ export class NoteskySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('PDS URL (advanced)')
-      .setDesc('Leave empty to auto-detect from your handle. Set for self-hosted or local testing, e.g. http://localhost:3000.')
-      .addText((t) =>
-        t.setPlaceholder('auto').setValue(s.pdsUrlOverride).onChange(async (v) => {
-          s.pdsUrlOverride = v.trim();
-          await this.plugin.saveSettings();
-        })
-      );
-
-    new Setting(containerEl)
       .setName('Sign in with Bluesky')
       .setDesc(
         s.authMode === 'oauth' && s.authDid
@@ -119,31 +109,6 @@ export class NoteskySettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
-      .setName('App password')
-      .setDesc('Create one in your PDS account settings — not your main password.')
-      .addText((t) => {
-        t.inputEl.type = 'password';
-        t.setValue(s.appPassword).onChange(async (v) => {
-          s.appPassword = v.trim();
-          await this.plugin.saveSettings();
-        });
-      })
-      .addButton((b) =>
-        b.setButtonText('Test login').onClick(async () => {
-          try {
-            this.plugin.pdsClient = await login({
-              identifier: s.identifier,
-              password: s.appPassword,
-              pdsUrl: s.pdsUrlOverride || undefined,
-            });
-            new Notice('Notesky: login OK');
-          } catch (err) {
-            new Notice(`Notesky: login failed — ${err instanceof Error ? err.message : err}`);
-          }
-        })
-      );
-
     new Setting(containerEl).setName('Log out').addButton((b) =>
       b.setButtonText('Log out').onClick(async () => {
         if (s.authMode === 'oauth' && s.authDid) {
@@ -160,6 +125,11 @@ export class NoteskySettingTab extends PluginSettingTab {
 
     // ── Encryption ─────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Encryption').setHeading();
+    if (!s.masterKeyB64) {
+      containerEl.createEl('p', {
+        text: 'Syncing stays off until you set a passphrase — nothing leaves this device unencrypted.',
+      });
+    }
     containerEl.createEl('p', {
       text: PASSPHRASE_WARNING,
       cls: 'mod-warning',
@@ -211,6 +181,44 @@ export class NoteskySettingTab extends PluginSettingTab {
         })
       );
 
+    // ── Advanced ───────────────────────────────────────────────────────────
+    new Setting(containerEl).setName('Advanced').setHeading();
+
+    new Setting(containerEl)
+      .setName('App password')
+      .setDesc('Fallback if Sign in with Bluesky is unavailable. Create one in your PDS account settings — not your main password.')
+      .addText((t) => {
+        t.inputEl.type = 'password';
+        t.setValue(s.appPassword).onChange(async (v) => {
+          s.appPassword = v.trim();
+          await this.plugin.saveSettings();
+        });
+      })
+      .addButton((b) =>
+        b.setButtonText('Test login').onClick(async () => {
+          try {
+            this.plugin.pdsClient = await login({
+              identifier: s.identifier,
+              password: s.appPassword,
+              pdsUrl: s.pdsUrlOverride || undefined,
+            });
+            new Notice('Notesky: login OK');
+          } catch (err) {
+            new Notice(`Notesky: login failed — ${err instanceof Error ? err.message : err}`);
+          }
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('PDS URL')
+      .setDesc('Leave empty to auto-detect from your handle. Set for self-hosted or local testing, e.g. http://localhost:3000.')
+      .addText((t) =>
+        t.setPlaceholder('auto').setValue(s.pdsUrlOverride).onChange(async (v) => {
+          s.pdsUrlOverride = v.trim();
+          await this.plugin.saveSettings();
+        })
+      );
+
     const skipped = this.plugin.skippedPaths;
     if (skipped.length > 0) {
       new Setting(containerEl).setName('Skipped files').setHeading();
@@ -231,7 +239,7 @@ export class NoteskySettingTab extends PluginSettingTab {
         b.setButtonText('Re-scan').setWarning().onClick(async () => {
           await this.plugin.store.save([]);
           new Notice('Notesky: sync state cleared; next sync re-scans everything.');
-          await this.plugin.runSync();
+          await this.plugin.runSync(true);
         })
       );
 

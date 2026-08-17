@@ -69,7 +69,7 @@ export default class NoteskyPlugin extends Plugin {
     this.addCommand({
       id: 'sync-now',
       name: 'Sync now',
-      callback: () => void this.runSync(),
+      callback: () => void this.runSync(true),
     });
     registerPublishCommands(this);
 
@@ -115,6 +115,7 @@ export default class NoteskyPlugin extends Plugin {
     const hasAuth =
       s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
     if (!hasAuth || !s.masterKeyB64 || !s.vaultRkey) {
+      this.setStatus('setup');
       return; // not onboarded yet; settings tab drives setup
     }
     try {
@@ -174,9 +175,24 @@ export default class NoteskyPlugin extends Plugin {
     this.registerInterval(this.intervalHandle);
   }
 
-  async runSync(): Promise<void> {
+  async runSync(manual = false): Promise<void> {
     if (!this.engine) {
-      new Notice('Notesky: not configured yet — open settings to connect.');
+      // Background syncs stay silent while unconfigured; only a user-initiated
+      // sync explains what is missing.
+      if (manual) {
+        const s = this.settings;
+        const hasAuth =
+          s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
+        if (!hasAuth) {
+          new Notice('Notesky: connect your account in settings first.');
+        } else if (!s.masterKeyB64 || !s.vaultRkey) {
+          new Notice(
+            'Notesky: set your encryption passphrase in settings — syncing stays off until then.'
+          );
+        } else {
+          new Notice('Notesky: not connected — check settings.');
+        }
+      }
       return;
     }
     if (this.syncing) return;
@@ -194,11 +210,18 @@ export default class NoteskyPlugin extends Plugin {
     }
   }
 
-  private setStatus(state: 'idle' | 'syncing' | 'error'): void {
+  private setStatus(state: 'idle' | 'syncing' | 'error' | 'setup'): void {
     const time = this.lastSyncAt
       ? ` · ${this.lastSyncAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
       : '';
-    const label = state === 'syncing' ? 'syncing…' : state === 'error' ? 'error' : `synced${time}`;
+    const label =
+      state === 'syncing'
+        ? 'syncing…'
+        : state === 'error'
+          ? 'error'
+          : state === 'setup'
+            ? 'setup needed'
+            : `synced${time}`;
     this.statusBar.setText(`Notesky: ${label}`);
   }
 }

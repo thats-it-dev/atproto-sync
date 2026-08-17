@@ -61,7 +61,7 @@ async function promptMakePublic(plugin: NoteskyPlugin, file: TFile): Promise<voi
   new MakePublicModal(plugin.app, file, content, async (slug) => {
     await plugin.app.vault.modify(file, setPublicFlag(content, slug));
     new Notice(`Notesky: "${file.basename}" is now public.`);
-    await plugin.runSync();
+    await plugin.runSync(true);
   }).open();
 }
 
@@ -75,7 +75,7 @@ async function makePrivate(plugin: NoteskyPlugin, file: TFile): Promise<void> {
   // after this edit rotates the key as required.
   await plugin.app.vault.modify(file, removePublicFlag(content));
   new Notice(`Notesky: "${file.basename}" is private again.`);
-  await plugin.runSync();
+  await plugin.runSync(true);
 }
 
 class MakePublicModal extends Modal {
