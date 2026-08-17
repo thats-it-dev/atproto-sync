@@ -7,6 +7,7 @@ import { IndexedDbStore } from './store';
 import { ObsidianVaultAdapter } from './vault-adapter';
 import { RealPdsClient, login } from './pds-client';
 import { NoteskySettingTab } from './settings';
+import { SetupWizard } from './setup-wizard';
 import { registerPublishCommands } from './publish';
 
 export interface NoteskySettings {
@@ -45,6 +46,13 @@ export default class NoteskyPlugin extends Plugin {
   store!: IndexedDbStore;
   pdsClient: RealPdsClient | null = null;
   oauth = new NoteskyOAuth();
+  private authListeners = new Set<() => void>();
+
+  /** Subscribe to completed sign-ins (e.g. the OAuth protocol-handler return). */
+  onAuthChanged(listener: () => void): () => void {
+    this.authListeners.add(listener);
+    return () => this.authListeners.delete(listener);
+  }
   private engine: SyncEngine | null = null;
 
   /** Files the last sync skipped as too large for the PDS (shown in settings). */
@@ -71,6 +79,11 @@ export default class NoteskyPlugin extends Plugin {
       name: 'Sync now',
       callback: () => void this.runSync(true),
     });
+    this.addCommand({
+      id: 'setup',
+      name: 'Set up sync',
+      callback: () => new SetupWizard(this.app, this).open(),
+    });
     registerPublishCommands(this);
 
     this.registerObsidianProtocolHandler('notesky-auth', (params) => {
@@ -83,6 +96,7 @@ export default class NoteskyPlugin extends Plugin {
           this.pdsClient = new RealPdsClient(new Agent(session), session.did);
           await this.saveSettings();
           new Notice(`Notesky: signed in as ${session.did}`);
+          this.authListeners.forEach((listener) => listener());
           await this.initEngine();
         } catch (err) {
           new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
@@ -90,7 +104,16 @@ export default class NoteskyPlugin extends Plugin {
       })();
     });
 
-    this.app.workspace.onLayoutReady(() => void this.initEngine());
+    this.app.workspace.onLayoutReady(() =>
+      void (async () => {
+        await this.initEngine();
+        // Fresh install (no auth, no key): open the guided setup once.
+        const s = this.settings;
+        if (!s.masterKeyB64 && !s.authDid && !s.appPassword) {
+          new SetupWizard(this.app, this).open();
+        }
+      })()
+    );
 
     this.registerEvent(this.app.vault.on('modify', () => this.scheduleSync()));
     this.registerEvent(this.app.vault.on('create', () => this.scheduleSync()));

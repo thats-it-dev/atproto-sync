@@ -1,10 +1,7 @@
 import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
-import { VAULT_COLLECTION } from '../lexicon/build';
-import type { VaultRecord } from '../lexicon/types';
-import { fromB64, toB64 } from '../crypto/box';
-import { makeCheckValue, verifyCheckValue } from '../crypto/check';
-import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '../crypto/keys';
 import { login } from './pds-client';
+import { WrongPassphraseError, setupVaultEncryption } from './onboarding';
+import { SetupWizard } from './setup-wizard';
 import type NoteskyPlugin from './main';
 
 /** Mobile sign-in: the user must tap the link themselves for Safari/Chrome to open. */
@@ -63,6 +60,20 @@ export class NoteskySettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.plugin.settings;
+
+    if (!s.masterKeyB64 || !s.vaultRkey) {
+      new Setting(containerEl)
+        .setName('Guided setup')
+        .setDesc('Sign in and set your passphrase in two steps.')
+        .addButton((b) =>
+          b
+            .setButtonText('Start setup')
+            .setCta()
+            .onClick(() => {
+              new SetupWizard(this.app, this.plugin).open();
+            })
+        );
+    }
 
     // ── Account ────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Account').setHeading();
@@ -264,76 +275,24 @@ export class NoteskySettingTab extends PluginSettingTab {
 
   /** First device creates the vault record; later devices verify against it. */
   private async setupEncryption(): Promise<void> {
-    const s = this.plugin.settings;
     if (!this.passphrase) {
       new Notice('Notesky: enter a passphrase first.');
       return;
     }
-    if (!this.plugin.pdsClient) {
-      try {
-        this.plugin.pdsClient = await login({
-          identifier: s.identifier,
-          password: s.appPassword,
-          pdsUrl: s.pdsUrlOverride || undefined,
-        });
-      } catch (err) {
-        new Notice(`Notesky: log in first — ${err instanceof Error ? err.message : err}`);
-        return;
-      }
-    }
-    const pds = this.plugin.pdsClient;
-    const vaults = await pds.listRecords(VAULT_COLLECTION);
-
-    if (vaults.length === 0) {
-      // First device: create the vault record.
-      const salt = await generateSalt();
-      const master = await deriveMasterKey(this.passphrase, salt, DEFAULT_KDF_PARAMS);
-      const check = await makeCheckValue(master);
-      const record: VaultRecord = {
-        $type: 'app.notesky.vault',
-        name: this.app.vault.getName(),
-        formatVersion: 1,
-        kdf: {
-          alg: 'argon2id13',
-          saltB64: await toB64(salt),
-          opsLimit: DEFAULT_KDF_PARAMS.opsLimit,
-          memLimit: DEFAULT_KDF_PARAMS.memLimit,
-        },
-        checkValue: {
-          nonce: await toB64(check.nonce),
-          ciphertext: await toB64(check.ciphertext),
-        },
-        createdAt: new Date().toISOString(),
-      };
-      const rkey = `vault${Date.now().toString(36)}`;
-      await pds.putRecord(VAULT_COLLECTION, rkey, record, null);
-      s.vaultRkey = rkey;
-      s.masterKeyB64 = await toB64(master);
-      await this.plugin.saveSettings();
-      new Notice('Notesky: encryption set up. This vault is now syncing.');
-    } else {
-      // Later device: verify the passphrase against the existing vault record.
-      const { rkey, value } = vaults[0];
-      const rec = value as VaultRecord;
-      const master = await deriveMasterKey(this.passphrase, await fromB64(rec.kdf.saltB64), {
-        opsLimit: rec.kdf.opsLimit,
-        memLimit: rec.kdf.memLimit,
-      });
-      const ok = await verifyCheckValue(
-        {
-          nonce: await fromB64(rec.checkValue.nonce),
-          ciphertext: await fromB64(rec.checkValue.ciphertext),
-        },
-        master
+    try {
+      const result = await setupVaultEncryption(this.plugin, this.passphrase);
+      new Notice(
+        result === 'created'
+          ? 'Notesky: encryption set up. This vault is now syncing.'
+          : 'Notesky: passphrase verified. This device is now syncing.'
       );
-      if (!ok) {
+    } catch (err) {
+      if (err instanceof WrongPassphraseError) {
         new Notice('Notesky: wrong passphrase for this vault.');
-        return;
+      } else {
+        new Notice(`Notesky: ${err instanceof Error ? err.message : err}`);
       }
-      s.vaultRkey = rkey;
-      s.masterKeyB64 = await toB64(master);
-      await this.plugin.saveSettings();
-      new Notice('Notesky: passphrase verified. This device is now syncing.');
+      return;
     }
     this.passphrase = '';
     await this.plugin.initEngine();
