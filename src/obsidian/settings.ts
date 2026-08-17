@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from 'obsidian';
 import { VAULT_COLLECTION } from '../lexicon/build';
 import type { VaultRecord } from '../lexicon/types';
 import { fromB64, toB64 } from '../crypto/box';
@@ -6,6 +6,45 @@ import { makeCheckValue, verifyCheckValue } from '../crypto/check';
 import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '../crypto/keys';
 import { login } from './pds-client';
 import type NoteskyPlugin from './main';
+
+/** Mobile sign-in: the user must tap the link themselves for Safari/Chrome to open. */
+class OpenBrowserModal extends Modal {
+  constructor(
+    app: App,
+    private readonly url: string
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl('h2', { text: 'Continue in your browser' });
+    contentEl.createEl('p', {
+      text: 'Tap below to open your PDS login page. Obsidian will reopen automatically once you approve.',
+    });
+    const link = contentEl.createEl('a', {
+      text: 'Open login page',
+      href: this.url,
+      cls: 'mod-cta',
+    });
+    link.setAttr('target', '_blank');
+    link.setAttr('rel', 'noopener');
+    link.style.display = 'inline-block';
+    link.style.margin = '0.5em 0 1em';
+    link.style.fontSize = '1.1em';
+    link.addEventListener('click', () => this.close());
+    new Setting(contentEl).addButton((b) =>
+      b.setButtonText('Copy link instead').onClick(async () => {
+        await navigator.clipboard.writeText(this.url);
+        new Notice('Notesky: link copied — paste it into your browser.');
+      })
+    );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
 
 export const PASSPHRASE_WARNING =
   'If you lose this passphrase, encrypted notes on the server cannot be recovered by anyone — including us.';
@@ -65,8 +104,15 @@ export class NoteskySettingTab extends PluginSettingTab {
               return;
             }
             try {
-              await this.plugin.oauth.startLogin(s.identifier);
-              new Notice('Notesky: continue in your browser; Obsidian will reopen when done.');
+              const url = await this.plugin.oauth.createAuthUrl(s.identifier);
+              if (Platform.isMobileApp) {
+                // Mobile WebViews ignore programmatic window.open; a real tap
+                // on a real anchor rides Obsidian's external-link handling.
+                new OpenBrowserModal(this.app, url).open();
+              } else {
+                window.open(url);
+                new Notice('Notesky: continue in your browser; Obsidian will reopen when done.');
+              }
             } catch (err) {
               new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
             }

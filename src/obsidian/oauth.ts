@@ -35,10 +35,14 @@ export class NoteskyOAuth {
     });
   }
 
-  /** Open the system browser on the user's PDS login page. */
-  async startLogin(handle: string): Promise<void> {
+  /**
+   * Build the authorization URL for the user's PDS login page. The caller
+   * decides how to open it: window.open works on desktop, but mobile WebViews
+   * need a real user tap on a real anchor.
+   */
+  async createAuthUrl(handle: string): Promise<string> {
     const url = await this.client.authorize(handle);
-    window.open(url.toString());
+    return url.toString();
   }
 
   /** Complete the flow with the params delivered to obsidian://notesky-auth. */
