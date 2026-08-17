@@ -1,6 +1,8 @@
 import { Notice, Plugin } from 'obsidian';
+import { Agent } from '@atproto/api';
 import { SyncEngine } from '../sync/engine';
 import { fromB64 } from '../crypto/box';
+import { NoteskyOAuth } from './oauth';
 import { IndexedDbStore } from './store';
 import { ObsidianVaultAdapter } from './vault-adapter';
 import { RealPdsClient, login } from './pds-client';
@@ -10,6 +12,10 @@ import { registerPublishCommands } from './publish';
 export interface NoteskySettings {
   identifier: string;
   appPassword: string;
+  /** 'oauth' after a Sign in with Bluesky; app-password otherwise. */
+  authMode: 'app-password' | 'oauth';
+  /** DID of the OAuth session to restore on load. */
+  authDid: string;
   /** Direct PDS URL, skipping handle resolution (self-hosted / local testing). */
   pdsUrlOverride: string;
   /** rkey of the app.notesky.vault record; set during onboarding. */
@@ -23,6 +29,8 @@ export interface NoteskySettings {
 export const DEFAULT_SETTINGS: NoteskySettings = {
   identifier: '',
   appPassword: '',
+  authMode: 'app-password',
+  authDid: '',
   pdsUrlOverride: '',
   vaultRkey: '',
   masterKeyB64: '',
@@ -36,6 +44,7 @@ export default class NoteskyPlugin extends Plugin {
   settings: NoteskySettings = { ...DEFAULT_SETTINGS };
   store!: IndexedDbStore;
   pdsClient: RealPdsClient | null = null;
+  oauth = new NoteskyOAuth();
   private engine: SyncEngine | null = null;
 
   /** Files the last sync skipped as too large for the PDS (shown in settings). */
@@ -64,6 +73,23 @@ export default class NoteskyPlugin extends Plugin {
     });
     registerPublishCommands(this);
 
+    this.registerObsidianProtocolHandler('notesky-auth', (params) => {
+      void (async () => {
+        try {
+          const session = await this.oauth.completeCallback(params);
+          this.settings.authMode = 'oauth';
+          this.settings.authDid = session.did;
+          // Ready for onboarding (vault record setup) even before the engine can start.
+          this.pdsClient = new RealPdsClient(new Agent(session), session.did);
+          await this.saveSettings();
+          new Notice(`Notesky: signed in as ${session.did}`);
+          await this.initEngine();
+        } catch (err) {
+          new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
+        }
+      })();
+    });
+
     this.app.workspace.onLayoutReady(() => void this.initEngine());
 
     this.registerEvent(this.app.vault.on('modify', () => this.scheduleSync()));
@@ -86,15 +112,22 @@ export default class NoteskyPlugin extends Plugin {
   /** (Re)build the engine from settings; called on load and after onboarding. */
   async initEngine(): Promise<void> {
     const s = this.settings;
-    if (!s.identifier || !s.appPassword || !s.masterKeyB64 || !s.vaultRkey) {
+    const hasAuth =
+      s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
+    if (!hasAuth || !s.masterKeyB64 || !s.vaultRkey) {
       return; // not onboarded yet; settings tab drives setup
     }
     try {
-      this.pdsClient = await login({
-        identifier: s.identifier,
-        password: s.appPassword,
-        pdsUrl: s.pdsUrlOverride || undefined,
-      });
+      if (s.authMode === 'oauth') {
+        const session = await this.oauth.restore(s.authDid);
+        this.pdsClient = new RealPdsClient(new Agent(session), s.authDid);
+      } else {
+        this.pdsClient = await login({
+          identifier: s.identifier,
+          password: s.appPassword,
+          pdsUrl: s.pdsUrlOverride || undefined,
+        });
+      }
       let progressNotice: Notice | null = null;
       this.engine = new SyncEngine({
         pds: this.pdsClient,

@@ -135,7 +135,19 @@ Expect base64 ciphertext only — no note text, no paths, no titles.
    gone, curl shows ciphertext again.
 5. File-context-menu "Notesky: toggle public" round-trips the same way.
 
-## 7. Acceptance (from the plan's "Done means")
+## 7. OAuth (needs notesky.app live and a real Bluesky account)
+
+1. Verify hosting: `curl https://notesky.app/oauth/client-metadata.json` returns
+   the metadata JSON; `https://notesky.app/oauth/callback` loads the bounce page.
+2. In a fresh vault (no PDS URL override): enter your handle → **Sign in with
+   Bluesky** → browser opens your PDS login → approve → Obsidian reopens with
+   "signed in as did:…". Set/enter the passphrase as usual.
+3. Restart Obsidian → the session restores without re-auth (tokens refresh via
+   the stored DPoP session).
+4. Log out → sign-in state clears; app-password login still works as before.
+5. Repeat on iOS and Android.
+
+## 8. Acceptance (from the plan's "Done means")
 
 `npm run typecheck` clean; `npx vitest run` green; sections 4–6 above pass;
 finally, two real devices (desktop + one mobile) against a test Bluesky

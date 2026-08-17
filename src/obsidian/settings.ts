@@ -49,6 +49,31 @@ export class NoteskySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName('Sign in with Bluesky')
+      .setDesc(
+        s.authMode === 'oauth' && s.authDid
+          ? `Signed in via OAuth as ${s.authDid}`
+          : 'Opens your PDS login page in the browser — no app password needed.'
+      )
+      .addButton((b) =>
+        b
+          .setButtonText('Sign in')
+          .setCta()
+          .onClick(async () => {
+            if (!s.identifier) {
+              new Notice('Notesky: enter your handle first.');
+              return;
+            }
+            try {
+              await this.plugin.oauth.startLogin(s.identifier);
+              new Notice('Notesky: continue in your browser; Obsidian will reopen when done.');
+            } catch (err) {
+              new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
+            }
+          })
+      );
+
+    new Setting(containerEl)
       .setName('App password')
       .setDesc('Create one in your PDS account settings — not your main password.')
       .addText((t) => {
@@ -75,7 +100,12 @@ export class NoteskySettingTab extends PluginSettingTab {
 
     new Setting(containerEl).setName('Log out').addButton((b) =>
       b.setButtonText('Log out').onClick(async () => {
+        if (s.authMode === 'oauth' && s.authDid) {
+          await this.plugin.oauth.logout(s.authDid).catch(() => {});
+        }
         s.appPassword = '';
+        s.authDid = '';
+        s.authMode = 'app-password';
         await this.plugin.saveSettings();
         this.plugin.disconnectEngine();
         this.display();

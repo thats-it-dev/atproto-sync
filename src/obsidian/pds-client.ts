@@ -1,4 +1,5 @@
 import {
+  Agent,
   AtpAgent,
   ComAtprotoRepoApplyWrites,
   ComAtprotoRepoDeleteRecord,
@@ -23,10 +24,10 @@ function mapPdsError(err: unknown): unknown {
   return err;
 }
 
-/** PdsClient over a logged-in AtpAgent, scoped to the account's own repo. */
+/** PdsClient over a logged-in Agent (app-password AtpAgent or OAuth session), scoped to the account's own repo. */
 export class RealPdsClient implements PdsClient {
   constructor(
-    private readonly agent: AtpAgent,
+    private readonly agent: Agent,
     private readonly did: string
   ) {}
 
