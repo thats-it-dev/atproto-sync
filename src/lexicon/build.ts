@@ -1,4 +1,10 @@
-import type { EncryptedContent, NoteRecord, PlaintextContent } from './types';
+import type {
+  AttachmentRecord,
+  EncryptedAttachmentMeta,
+  EncryptedContent,
+  NoteRecord,
+  PlaintextContent,
+} from './types';
 
 export const NOTE_COLLECTION = 'app.notesky.note';
 export const VAULT_COLLECTION = 'app.notesky.vault';
@@ -68,6 +74,57 @@ export async function buildPlaintextNote(input: PlaintextNoteInput): Promise<Not
     updatedAt: input.updatedAt,
     contentHash: await sha256Hex(input.text),
     content,
+  };
+}
+
+export interface EncryptedAttachmentInput {
+  vault: string;
+  meta: EncryptedAttachmentMeta;
+  /** Opaque BlobRef returned by uploadBlob, embedded verbatim. */
+  blob: unknown;
+  createdAt?: string;
+  updatedAt: string;
+}
+
+export async function buildEncryptedAttachment(
+  input: EncryptedAttachmentInput
+): Promise<AttachmentRecord> {
+  return {
+    $type: 'app.notesky.attachment',
+    vault: input.vault,
+    formatVersion: FORMAT_VERSION,
+    ...(input.createdAt !== undefined ? { createdAt: input.createdAt } : {}),
+    updatedAt: input.updatedAt,
+    contentHash: await sha256Hex(input.meta.ciphertext),
+    blob: input.blob,
+    meta: input.meta,
+  };
+}
+
+export interface PlaintextAttachmentInput {
+  vault: string;
+  path: string;
+  mimeType: string;
+  /** Opaque BlobRef returned by uploadBlob, embedded verbatim. */
+  blob: unknown;
+  /** sha256 hex of the (unencrypted) stored bytes. */
+  contentHash: string;
+  createdAt?: string;
+  updatedAt: string;
+}
+
+export async function buildPlaintextAttachment(
+  input: PlaintextAttachmentInput
+): Promise<AttachmentRecord> {
+  return {
+    $type: 'app.notesky.attachment',
+    vault: input.vault,
+    formatVersion: FORMAT_VERSION,
+    ...(input.createdAt !== undefined ? { createdAt: input.createdAt } : {}),
+    updatedAt: input.updatedAt,
+    contentHash: input.contentHash,
+    blob: input.blob,
+    meta: { path: input.path.normalize('NFC'), mimeType: input.mimeType },
   };
 }
 
