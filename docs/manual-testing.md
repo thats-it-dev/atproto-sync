@@ -101,6 +101,17 @@ palette → "Notesky Sync: Sync now" to force either side.
   (Cmd-Q) while the progress notice is up, reopen → sync resumes and completes;
   spot-check no duplicate or missing notes in vault-b afterwards.
 
+**Attachments:**
+
+- Drop an image into vault-a (paste into a note or add the file directly) →
+  the file appears in vault-b with identical bytes.
+- Edit/delete/rename the image in either vault → propagates like notes.
+- Add a file larger than 5MB → a notice reports it as too large, it appears
+  under Settings → Notesky Sync → "Skipped files", and it stays local-only.
+- Check at rest: the `app.notesky.attachment` records (curl below, with
+  `collection=app.notesky.attachment`) show no filename, and the blob is not
+  the original bytes.
+
 Verify encryption at rest (no auth needed — repos are public):
 
 ```bash
@@ -111,9 +122,12 @@ Expect base64 ciphertext only — no note text, no paths, no titles.
 
 ## 6. Public toggle (Task 21 checklist)
 
-1. In vault-a, open a note → command palette → "Notesky Sync: Make note
-   public". The modal must list title, text, and any embeds; the slug is
-   editable. Confirm.
+1. In vault-a, open a note that embeds an image → command palette → "Notesky
+   Sync: Make note public". The modal must list title, text, and the embedded
+   image (published unencrypted); the slug is editable. Confirm. After sync,
+   the image's attachment record shows its real path/mimeType and the blob is
+   fetchable as the raw image; making the note private re-encrypts it (unless
+   another public note still embeds it).
 2. The note gains `notesky_public: true` frontmatter; the `listRecords` curl
    above now shows this note's text/slug in plaintext (only this one).
 3. Vault-b receives the frontmatter change and its record stays public.

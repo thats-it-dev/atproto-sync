@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { NOTE_COLLECTION, TOMBSTONE_COLLECTION } from '../../src/lexicon/build';
+import {
+  ATTACHMENT_COLLECTION,
+  NOTE_COLLECTION,
+  TOMBSTONE_COLLECTION,
+} from '../../src/lexicon/build';
 import { login } from '../../src/obsidian/pds-client';
 import { makeEngine } from './helpers';
 
@@ -14,7 +18,7 @@ const password = process.env.NOTESKY_PASSWORD;
 describe.skipIf(!url || !handle || !password)('SyncEngine against a live PDS', () => {
   it('two devices converge through the real server, encrypted at rest', async () => {
     const client = await login({ identifier: handle!, password: password!, pdsUrl: url! });
-    for (const col of [NOTE_COLLECTION, TOMBSTONE_COLLECTION]) {
+    for (const col of [NOTE_COLLECTION, ATTACHMENT_COLLECTION, TOMBSTONE_COLLECTION]) {
       for (const r of await client.listRecords(col)) await client.deleteRecord(col, r.rkey);
     }
 
@@ -54,5 +58,15 @@ describe.skipIf(!url || !handle || !password)('SyncEngine against a live PDS', (
     expect(a.vault.files.has('notes/n7.md')).toBe(false);
     expect((await client.listRecords(NOTE_COLLECTION)).length).toBe(14);
     expect((await client.listRecords(TOMBSTONE_COLLECTION)).length).toBe(1);
+
+    // Attachment round-trip: encrypted blob, hidden filename, exact bytes back.
+    const img = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 42, 42, 42]);
+    await a.vault.writeBinary('img/Live Test.png', img);
+    await a.engine.sync();
+    const attachments = await client.listRecords(ATTACHMENT_COLLECTION);
+    expect(attachments.length).toBe(1);
+    expect(JSON.stringify(attachments)).not.toContain('Live Test');
+    await b.engine.sync();
+    expect(await b.vault.readBinary('img/Live Test.png')).toEqual(img);
   }, 60_000);
 });

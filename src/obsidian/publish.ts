@@ -1,6 +1,6 @@
 import { App, Modal, Notice, Setting, TFile } from 'obsidian';
-import { NOTE_COLLECTION, slugify } from '../lexicon/build';
-import type { NoteRecord, PlaintextContent } from '../lexicon/types';
+import { ATTACHMENT_COLLECTION, NOTE_COLLECTION, slugify } from '../lexicon/build';
+import type { AttachmentMetaPlaintext, AttachmentRecord, NoteRecord, PlaintextContent } from '../lexicon/types';
 import { isEncrypted } from '../lexicon/build';
 import {
   extractEmbedTargets,
@@ -103,7 +103,7 @@ class MakePublicModal extends Modal {
     const embeds = extractEmbedTargets(this.content);
     if (embeds.length > 0) {
       ul.createEl('li', {
-        text: `Embedded attachments that will become public with it: ${embeds.join(', ')}`,
+        text: `Embedded attachments published unencrypted with it: ${embeds.join(', ')}`,
       });
     }
 
@@ -140,13 +140,19 @@ async function reviewPublicNotes(plugin: NoteskyPlugin): Promise<void> {
     .map((r) => r.value as NoteRecord)
     .filter((v) => !isEncrypted(v.content))
     .map((v) => v.content as PlaintextContent);
-  new ReviewPublicModal(plugin, publicNotes).open();
+  const attachmentRecords = await plugin.pdsClient.listRecords(ATTACHMENT_COLLECTION);
+  const publicAttachments = attachmentRecords
+    .map((r) => r.value as AttachmentRecord)
+    .filter((v) => !('ciphertext' in v.meta))
+    .map((v) => v.meta as AttachmentMetaPlaintext);
+  new ReviewPublicModal(plugin, publicNotes, publicAttachments).open();
 }
 
 class ReviewPublicModal extends Modal {
   constructor(
     private readonly plugin: NoteskyPlugin,
-    private readonly notes: PlaintextContent[]
+    private readonly notes: PlaintextContent[],
+    private readonly attachments: AttachmentMetaPlaintext[]
   ) {
     super(plugin.app);
   }
@@ -154,7 +160,7 @@ class ReviewPublicModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.createEl('h2', { text: 'Public notes' });
-    if (this.notes.length === 0) {
+    if (this.notes.length === 0 && this.attachments.length === 0) {
       contentEl.createEl('p', { text: 'No public notes. Everything is encrypted.' });
       return;
     }
@@ -173,6 +179,15 @@ class ReviewPublicModal extends Modal {
             }
           })
         );
+    }
+    if (this.attachments.length > 0) {
+      contentEl.createEl('h3', { text: 'Public attachments' });
+      contentEl.createEl('p', {
+        text: 'Public because a public note embeds them; they re-encrypt automatically when those notes go private.',
+      });
+      for (const att of this.attachments) {
+        new Setting(contentEl).setName(att.path).setDesc(att.mimeType);
+      }
     }
   }
 

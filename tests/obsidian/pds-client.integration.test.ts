@@ -14,7 +14,9 @@ const handle = process.env.NOTESKY_HANDLE;
 const password = process.env.NOTESKY_PASSWORD;
 
 describe.skipIf(!url || !handle || !password)('RealPdsClient against a live PDS', () => {
-  const COLLECTION = 'app.notesky.note';
+  // Distinct collection: the engine-live test wipes app.notesky.* sync
+  // collections and both files may run in parallel.
+  const COLLECTION = 'app.notesky.integrationtest';
 
   it('exercises put/get/list/delete with CAS semantics', async () => {
     const client = await login({ identifier: handle!, password: password!, pdsUrl: url! });

@@ -37,6 +37,11 @@ export default class NoteskyPlugin extends Plugin {
   store!: IndexedDbStore;
   pdsClient: RealPdsClient | null = null;
   private engine: SyncEngine | null = null;
+
+  /** Files the last sync skipped as too large for the PDS (shown in settings). */
+  get skippedPaths(): string[] {
+    return this.engine?.lastSkippedPaths ?? [];
+  }
   private statusBar!: HTMLElement;
   private syncing = false;
   private lastSyncAt: Date | null = null;

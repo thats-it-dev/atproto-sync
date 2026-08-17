@@ -135,6 +135,16 @@ export class NoteskySettingTab extends PluginSettingTab {
         })
       );
 
+    const skipped = this.plugin.skippedPaths;
+    if (skipped.length > 0) {
+      new Setting(containerEl).setName('Skipped files').setHeading();
+      containerEl.createEl('p', {
+        text: 'Too large for your PDS to store — these stay on this device only:',
+      });
+      const list = containerEl.createEl('ul');
+      for (const path of skipped) list.createEl('li', { text: path });
+    }
+
     // ── Danger zone ────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Danger zone').setHeading();
 
