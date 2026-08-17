@@ -8,7 +8,7 @@ import { getPublicSlug, isPublicNote } from '../publish/frontmatter';
 import type { NoteRecord, TombstoneRecord } from '../lexicon/types';
 import { decryptNote, encryptNote } from '../crypto/note';
 import { CasError, PdsClient } from './pds';
-import { IndexEntry, LocalFile, RemoteNote, reconcile } from './reconcile';
+import { IndexEntry, LocalFile, Op, RemoteNote, reconcile } from './reconcile';
 import { merge3 } from './merge';
 
 export interface VaultAdapter {
@@ -60,6 +60,33 @@ function generateRkey(): string {
   return `${time}${rand}${(rkeyCounter++ % 36).toString(36)}`;
 }
 
+type ListedRecord = { rkey: string; cid: string; value: unknown };
+type MergeOp = Extract<Op, { kind: 'merge' }>;
+
+/**
+ * What differs per synced collection (notes vs attachments). The shared
+ * sync pass handles listing, tombstones, canonicalization, CAS, batching,
+ * progress, and index persistence.
+ */
+interface CollectionStrategy {
+  collection: string;
+  /** Local view; content is the comparable string (text for notes, hash tag for attachments). */
+  listLocal(): Promise<LocalFile[]>;
+  /** Remote view of one listed record. Throws on undecryptable → record is frozen. */
+  decryptRemote(rec: ListedRecord): Promise<{ path: string; content: string }>;
+  /** Record value to put for a push/pushCreate of this path+content. */
+  makeRecord(path: string, content: string): Promise<unknown>;
+  /** Write the pulled remote state into the vault. */
+  applyPull(path: string, content: string, rkey: string): Promise<void>;
+  /**
+   * Resolve a merge op. `push`: push this content (and write it locally).
+   * `accept`: take the remote side as-is, nothing pushed.
+   */
+  resolveMerge(op: MergeOp): Promise<{ push: string } | { accept: true }>;
+  removeLocal(path: string): Promise<void>;
+  unreadableWarning(count: number): string;
+}
+
 export class SyncEngine {
   private readonly opts: SyncEngineOptions;
 
@@ -83,11 +110,84 @@ export class SyncEngine {
     return this.opts.rkeyGen ? this.opts.rkeyGen() : generateRkey();
   }
 
+  private stashPath(notePath: string): string {
+    const basename = notePath.split('/').pop() ?? notePath;
+    const stamp = this.nowIso().slice(0, 19).replace('T', ' ').replaceAll(':', '.');
+    return `${CONFLICTS_FOLDER}/${stamp} ${basename}`;
+  }
+
+  private notesStrategy(): CollectionStrategy {
+    const { vault, masterKey } = this.opts;
+    const engine = this;
+    return {
+      collection: NOTE_COLLECTION,
+
+      async listLocal() {
+        return (await vault.readAll()).filter((f) => !f.path.startsWith(`${CONFLICTS_FOLDER}/`));
+      },
+
+      async decryptRemote(rec) {
+        const value = rec.value as NoteRecord;
+        const payload =
+          'ciphertext' in value.content
+            ? await decryptNote(value.content, masterKey)
+            : { path: value.content.path, title: value.content.title, body: value.content.text };
+        return { path: payload.path, content: payload.body };
+      },
+
+      async makeRecord(path, content) {
+        return engine.encryptToRecord(path, content);
+      },
+
+      async applyPull(path, content) {
+        await vault.write(path, content);
+      },
+
+      async resolveMerge(op) {
+        const r = merge3(op.base, op.local, op.remote);
+        if (!r.clean) {
+          // Some local edits could not be applied: stash the full local
+          // version on this device so nothing is lost, and say so.
+          await vault.write(engine.stashPath(op.path), op.local);
+          engine.opts.onWarning?.(
+            `Conflicting edits in "${op.path}" could not be fully merged. ` +
+              `Your version is saved in "${CONFLICTS_FOLDER}".`
+          );
+        }
+        return { push: r.merged };
+      },
+
+      async removeLocal(path) {
+        await vault.remove(path);
+      },
+
+      unreadableWarning(count) {
+        return (
+          `${count} note record(s) could not be decrypted and were skipped. ` +
+          'Check that every device uses the same passphrase.'
+        );
+      },
+    };
+  }
+
   /** Returns true if a CAS conflict made the cycle dirty. */
   private async syncOnce(): Promise<boolean> {
-    const { pds, vault, index: store, masterKey } = this.opts;
+    const entries = await this.opts.index.load();
+    return this.syncCollection(this.notesStrategy(), entries, []);
+  }
 
-    const indexEntries = await store.load();
+  /**
+   * One reconcile-and-execute pass over a collection. `entries` are this
+   * collection's index entries; `otherEntries` are preserved verbatim in
+   * every save so passes never clobber each other.
+   */
+  private async syncCollection(
+    strategy: CollectionStrategy,
+    indexEntries: IndexEntry[],
+    otherEntries: IndexEntry[]
+  ): Promise<boolean> {
+    const { pds, index: store } = this.opts;
+
     const indexByRkey = new Map(indexEntries.map((e) => [e.rkey, e]));
     // One index entry per path: a newly indexed rkey supersedes whatever
     // previously owned that path (e.g. a canonicalization loser).
@@ -97,21 +197,18 @@ export class SyncEngine {
       }
       indexByRkey.set(entry.rkey, entry);
     };
-    // The conflicts stash is device-local by construction: whatever the
-    // adapter or ignore settings say, it never enters reconciliation.
-    const local = (await vault.readAll()).filter(
-      (f) => !f.path.startsWith(`${CONFLICTS_FOLDER}/`)
-    );
+    const local = await strategy.listLocal();
 
     // Only this vault's records take part; other vaults on the same account
     // (or stale test data) are invisible.
-    const noteRecords = (await pds.listRecords(NOTE_COLLECTION)).filter(
-      (r) => (r.value as NoteRecord).vault === this.opts.vaultRkey
+    const records = (await pds.listRecords(strategy.collection)).filter(
+      (r) => (r.value as { vault?: string }).vault === this.opts.vaultRkey
     );
-    const tombstones = (await pds.listRecords(TOMBSTONE_COLLECTION)).filter(
-      (t) => (t.value as TombstoneRecord).vault === this.opts.vaultRkey
-    );
-    const liveRkeys = new Set(noteRecords.map((r) => r.rkey));
+    const tombstones = (await pds.listRecords(TOMBSTONE_COLLECTION)).filter((t) => {
+      const value = t.value as TombstoneRecord;
+      return value.vault === this.opts.vaultRkey && value.collection === strategy.collection;
+    });
+    const liveRkeys = new Set(records.map((r) => r.rkey));
     // Tombstones targeting a live record are stale (the note was resurrected).
     const tombstoneByTarget = new Map(
       tombstones
@@ -121,14 +218,10 @@ export class SyncEngine {
 
     const remote: RemoteNote[] = [];
     const unreadableRkeys = new Set<string>();
-    for (const rec of noteRecords) {
-      const value = rec.value as NoteRecord;
+    for (const rec of records) {
       try {
-        const payload =
-          'ciphertext' in value.content
-            ? await decryptNote(value.content, masterKey)
-            : { path: value.content.path, title: value.content.title, body: value.content.text };
-        remote.push({ rkey: rec.rkey, cid: rec.cid, path: payload.path, content: payload.body });
+        const payload = await strategy.decryptRemote(rec);
+        remote.push({ rkey: rec.rkey, cid: rec.cid, path: payload.path, content: payload.content });
       } catch {
         // Wrong key or corrupt record: freeze everything related to it this
         // cycle (never delete or overwrite what we cannot read) and warn.
@@ -136,10 +229,7 @@ export class SyncEngine {
       }
     }
     if (unreadableRkeys.size > 0) {
-      this.opts.onWarning?.(
-        `${unreadableRkeys.size} note record(s) could not be decrypted and were skipped. ` +
-          'Check that every device uses the same passphrase.'
-      );
+      this.opts.onWarning?.(strategy.unreadableWarning(unreadableRkeys.size));
     }
     // Freeze: an unreadable record's index entry and local file sit out this
     // cycle so the reconciler cannot mistake them for creates or deletes.
@@ -150,7 +240,7 @@ export class SyncEngine {
     const activeLocal = local.filter((f) => !frozenPaths.has(f.path));
     for (const [target, tomb] of tombstoneByTarget) {
       const entry = indexByRkey.get(target);
-      if (!entry) continue; // never synced that note here: nothing to delete
+      if (!entry) continue; // never synced that record here: nothing to delete
       remote.push({
         rkey: target,
         cid: tomb.cid,
@@ -191,9 +281,9 @@ export class SyncEngine {
           if (pds.applyCreates) {
             const writes = await Promise.all(
               chunk.map(async (op) => ({
-                collection: NOTE_COLLECTION,
+                collection: strategy.collection,
                 rkey: this.newRkey(),
-                value: await this.encryptToRecord(op.path, op.content),
+                value: await strategy.makeRecord(op.path, op.content),
               }))
             );
             const results = await pds.applyCreates(writes);
@@ -209,9 +299,9 @@ export class SyncEngine {
             for (const op of chunk) {
               const rkey = this.newRkey();
               const { cid } = await pds.putRecord(
-                NOTE_COLLECTION,
+                strategy.collection,
                 rkey,
-                await this.encryptToRecord(op.path, op.content),
+                await strategy.makeRecord(op.path, op.content),
                 null
               );
               setEntry({ path: op.path, rkey, baseContent: op.content, lastCid: cid });
@@ -228,103 +318,103 @@ export class SyncEngine {
       }
 
       for (const op of ops) {
-      try {
-        switch (op.kind) {
-          case 'push': {
-            // A push onto a tombstoned rkey recreates the record (edit wins over delete).
-            const resurrect = tombstonedRkeys.has(op.rkey);
-            const { cid } = await pds.putRecord(
-              NOTE_COLLECTION,
-              op.rkey,
-              await this.encryptToRecord(op.path, op.content),
-              resurrect ? null : op.swapCid
-            );
-            if (resurrect) {
-              const tomb = tombstoneByTarget.get(op.rkey);
-              if (tomb) await pds.deleteRecord(TOMBSTONE_COLLECTION, tomb.rkey);
-            }
-            setEntry({
-              path: op.path,
-              rkey: op.rkey,
-              baseContent: op.content,
-              lastCid: cid,
-            });
-            break;
-          }
-          case 'pull':
-          case 'pullCreate': {
-            const previous = indexByRkey.get(op.rkey);
-            await vault.write(op.path, op.content);
-            if (previous && previous.path !== op.path) {
-              await vault.remove(previous.path); // renamed remotely
-            }
-            setEntry({
-              path: op.path,
-              rkey: op.rkey,
-              baseContent: op.content,
-              lastCid: op.cid,
-            });
-            break;
-          }
-          case 'merge': {
-            const r = merge3(op.base, op.local, op.remote);
-            if (!r.clean) {
-              // Some local edits could not be applied: stash the full local
-              // version on this device so nothing is lost, and say so.
-              const basename = op.path.split('/').pop() ?? op.path;
-              const stamp = this.nowIso().slice(0, 19).replace('T', ' ').replaceAll(':', '.');
-              await vault.write(`${CONFLICTS_FOLDER}/${stamp} ${basename}`, op.local);
-              this.opts.onWarning?.(
-                `Conflicting edits in "${op.path}" could not be fully merged. ` +
-                  `Your version is saved in "${CONFLICTS_FOLDER}".`
+        try {
+          switch (op.kind) {
+            case 'push': {
+              // A push onto a tombstoned rkey recreates the record (edit wins over delete).
+              const resurrect = tombstonedRkeys.has(op.rkey);
+              const { cid } = await pds.putRecord(
+                strategy.collection,
+                op.rkey,
+                await strategy.makeRecord(op.path, op.content),
+                resurrect ? null : op.swapCid
               );
+              if (resurrect) {
+                const tomb = tombstoneByTarget.get(op.rkey);
+                if (tomb) await pds.deleteRecord(TOMBSTONE_COLLECTION, tomb.rkey);
+              }
+              setEntry({
+                path: op.path,
+                rkey: op.rkey,
+                baseContent: op.content,
+                lastCid: cid,
+              });
+              break;
             }
-            const { cid } = await pds.putRecord(
-              NOTE_COLLECTION,
-              op.rkey,
-              await this.encryptToRecord(op.path, r.merged),
-              op.swapCid
-            );
-            await vault.write(op.path, r.merged);
-            setEntry({
-              path: op.path,
-              rkey: op.rkey,
-              baseContent: r.merged,
-              lastCid: cid,
-            });
-            break;
+            case 'pull':
+            case 'pullCreate': {
+              const previous = indexByRkey.get(op.rkey);
+              await strategy.applyPull(op.path, op.content, op.rkey);
+              if (previous && previous.path !== op.path) {
+                await strategy.removeLocal(previous.path); // renamed remotely
+              }
+              setEntry({
+                path: op.path,
+                rkey: op.rkey,
+                baseContent: op.content,
+                lastCid: op.cid,
+              });
+              break;
+            }
+            case 'merge': {
+              const resolution = await strategy.resolveMerge(op);
+              if ('push' in resolution) {
+                const { cid } = await pds.putRecord(
+                  strategy.collection,
+                  op.rkey,
+                  await strategy.makeRecord(op.path, resolution.push),
+                  op.swapCid
+                );
+                await strategy.applyPull(op.path, resolution.push, op.rkey);
+                setEntry({
+                  path: op.path,
+                  rkey: op.rkey,
+                  baseContent: resolution.push,
+                  lastCid: cid,
+                });
+              } else {
+                // Remote side stands as-is; nothing pushed.
+                await strategy.applyPull(op.path, op.remote, op.rkey);
+                setEntry({
+                  path: op.path,
+                  rkey: op.rkey,
+                  baseContent: op.remote,
+                  lastCid: op.swapCid,
+                });
+              }
+              break;
+            }
+            case 'deleteRemote': {
+              await pds.deleteRecord(strategy.collection, op.rkey, op.swapCid);
+              const tombstone: TombstoneRecord = {
+                $type: 'app.notesky.tombstone',
+                vault: this.opts.vaultRkey,
+                target: op.rkey,
+                collection: strategy.collection,
+                deletedAt: this.nowIso(),
+              };
+              await pds.putRecord(TOMBSTONE_COLLECTION, this.newRkey(), tombstone, null);
+              indexByRkey.delete(op.rkey);
+              break;
+            }
+            case 'deleteLocal': {
+              await strategy.removeLocal(op.path);
+              indexByRkey.delete(op.rkey);
+              break;
+            }
           }
-          case 'deleteRemote': {
-            await pds.deleteRecord(NOTE_COLLECTION, op.rkey, op.swapCid);
-            const tombstone: TombstoneRecord = {
-              $type: 'app.notesky.tombstone',
-              vault: this.opts.vaultRkey,
-              target: op.rkey,
-              collection: NOTE_COLLECTION,
-              deletedAt: this.nowIso(),
-            };
-            await pds.putRecord(TOMBSTONE_COLLECTION, this.newRkey(), tombstone, null);
-            indexByRkey.delete(op.rkey);
-            break;
-          }
-          case 'deleteLocal': {
-            await vault.remove(op.path);
-            indexByRkey.delete(op.rkey);
-            break;
+        } catch (err) {
+          if (err instanceof CasError) {
+            dirty = true; // lost a race; the re-run sees fresh cids
+          } else {
+            throw err;
           }
         }
-      } catch (err) {
-        if (err instanceof CasError) {
-          dirty = true; // lost a race; the re-run sees fresh cids
-        } else {
-          throw err;
-        }
-      }
-      await progress(1);
+        await progress(1);
       }
     } finally {
       // Persist partial progress: an interrupted initial sync resumes cleanly.
-      await store.save([...indexByRkey.values()]);
+      await store.save([...otherEntries, ...indexByRkey.values()]);
     }
     return dirty;
   }
