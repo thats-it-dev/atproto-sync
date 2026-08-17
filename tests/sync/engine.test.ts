@@ -107,6 +107,49 @@ describe('SyncEngine', () => {
     expect(await b.vault.read('n29.md')).toBe('content 29');
   });
 
+  it('ignores note and tombstone records belonging to a different vault', async () => {
+    const pds = new FakePds();
+    const master = new Uint8Array(32).fill(3);
+    const other = makeEngine(pds, master, { vaultRkey: 'other-vault' });
+    await other.vault.write('theirs.md', 'other vault content');
+    await other.engine.sync();
+    await other.vault.remove('theirs.md');
+    await other.engine.sync(); // leaves a tombstone from the other vault too
+
+    const mine = makeEngine(pds, master); // vaultRkey 'test-vault'
+    await mine.vault.write('mine.md', 'my content');
+    await mine.engine.sync();
+
+    expect(mine.vault.files.size).toBe(1); // nothing pulled from the other vault
+    expect(await mine.vault.read('mine.md')).toBe('my content');
+    // And the other vault's records were not touched by our reconcile.
+    const rerun = makeEngine(pds, master, { vaultRkey: 'other-vault' });
+    await rerun.engine.sync();
+    expect(rerun.vault.files.size).toBe(0); // still deleted, tombstone intact
+  });
+
+  it('skips undecryptable records with a warning instead of failing the sync', async () => {
+    const pds = new FakePds();
+    const good = makeEngine(pds, new Uint8Array(32).fill(3));
+    const bad = makeEngine(pds, new Uint8Array(32).fill(9)); // wrong key, same vault
+    await bad.vault.write('locked.md', 'written under another key');
+    await bad.engine.sync();
+
+    const warnings: string[] = [];
+    const mine = makeEngine(pds, new Uint8Array(32).fill(3), {
+      onWarning: (msg) => warnings.push(msg),
+    });
+    await mine.vault.write('mine.md', 'my content');
+    await mine.engine.sync(); // must not throw
+
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toMatch(/could not be decrypted/);
+    expect(mine.vault.files.size).toBe(1);
+    // The unreadable record is left untouched, not deleted or overwritten.
+    expect((await pds.listRecords('app.notesky.note')).length).toBe(2);
+    void good;
+  });
+
   it('round-trips a public note to another device unchanged', async () => {
     const pds = new FakePds();
     const master = new Uint8Array(32).fill(3);

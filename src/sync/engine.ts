@@ -41,6 +41,8 @@ export interface SyncEngineOptions {
   interBatchDelayMs?: number;
   /** Called after each executed op (and each batch) with (done, total). */
   onProgress?: (done: number, total: number) => void;
+  /** Non-fatal problems (e.g. undecryptable records) surface here. */
+  onWarning?: (message: string) => void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -97,8 +99,14 @@ export class SyncEngine {
     };
     const local = await vault.readAll();
 
-    const noteRecords = await pds.listRecords(NOTE_COLLECTION);
-    const tombstones = await pds.listRecords(TOMBSTONE_COLLECTION);
+    // Only this vault's records take part; other vaults on the same account
+    // (or stale test data) are invisible.
+    const noteRecords = (await pds.listRecords(NOTE_COLLECTION)).filter(
+      (r) => (r.value as NoteRecord).vault === this.opts.vaultRkey
+    );
+    const tombstones = (await pds.listRecords(TOMBSTONE_COLLECTION)).filter(
+      (t) => (t.value as TombstoneRecord).vault === this.opts.vaultRkey
+    );
     const liveRkeys = new Set(noteRecords.map((r) => r.rkey));
     // Tombstones targeting a live record are stale (the note was resurrected).
     const tombstoneByTarget = new Map(
@@ -108,14 +116,34 @@ export class SyncEngine {
     );
 
     const remote: RemoteNote[] = [];
+    const unreadableRkeys = new Set<string>();
     for (const rec of noteRecords) {
       const value = rec.value as NoteRecord;
-      const payload =
-        'ciphertext' in value.content
-          ? await decryptNote(value.content, masterKey)
-          : { path: value.content.path, title: value.content.title, body: value.content.text };
-      remote.push({ rkey: rec.rkey, cid: rec.cid, path: payload.path, content: payload.body });
+      try {
+        const payload =
+          'ciphertext' in value.content
+            ? await decryptNote(value.content, masterKey)
+            : { path: value.content.path, title: value.content.title, body: value.content.text };
+        remote.push({ rkey: rec.rkey, cid: rec.cid, path: payload.path, content: payload.body });
+      } catch {
+        // Wrong key or corrupt record: freeze everything related to it this
+        // cycle (never delete or overwrite what we cannot read) and warn.
+        unreadableRkeys.add(rec.rkey);
+      }
     }
+    if (unreadableRkeys.size > 0) {
+      this.opts.onWarning?.(
+        `${unreadableRkeys.size} note record(s) could not be decrypted and were skipped. ` +
+          'Check that every device uses the same passphrase.'
+      );
+    }
+    // Freeze: an unreadable record's index entry and local file sit out this
+    // cycle so the reconciler cannot mistake them for creates or deletes.
+    const frozenPaths = new Set(
+      indexEntries.filter((e) => unreadableRkeys.has(e.rkey)).map((e) => e.path)
+    );
+    const activeIndex = indexEntries.filter((e) => !unreadableRkeys.has(e.rkey));
+    const activeLocal = local.filter((f) => !frozenPaths.has(f.path));
     for (const [target, tomb] of tombstoneByTarget) {
       const entry = indexByRkey.get(target);
       if (!entry) continue; // never synced that note here: nothing to delete
@@ -129,7 +157,7 @@ export class SyncEngine {
     }
 
     const tombstonedRkeys = new Set(tombstoneByTarget.keys());
-    const allOps = reconcile(local, remote, indexEntries);
+    const allOps = reconcile(activeLocal, remote, activeIndex);
     let dirty = false;
 
     const batchSize = this.opts.batchSize ?? 10;

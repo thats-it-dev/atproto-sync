@@ -101,6 +101,7 @@ export default class NoteskyPlugin extends Plugin {
         vaultRkey: s.vaultRkey,
         conflictMode: s.conflictMode,
         interBatchDelayMs: 300,
+        onWarning: (msg) => new Notice(`Notesky: ${msg}`, 10_000),
         onProgress: (done, total) => {
           if (total <= 50) return;
           if (!progressNotice) progressNotice = new Notice('', 0);
