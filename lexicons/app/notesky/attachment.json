@@ -25,13 +25,14 @@
     },
     "encrypted": {
       "type": "object",
-      "required": ["keyId", "wrappedKey", "keyNonce", "contentNonce", "ciphertext"],
+      "required": ["keyId", "wrappedKey", "keyNonce", "blobNonce", "metaNonce", "ciphertext"],
       "properties": {
         "keyId": { "type": "string" },
         "wrappedKey": { "type": "string", "description": "base64: per-attachment key wrapped by master key" },
         "keyNonce": { "type": "string" },
-        "contentNonce": { "type": "string", "description": "base64: nonce used for the blob ciphertext" },
-        "ciphertext": { "type": "string", "description": "base64: XChaCha20-Poly1305 over JSON {path, mimeType}" }
+        "blobNonce": { "type": "string", "description": "base64: nonce used for the blob ciphertext" },
+        "metaNonce": { "type": "string", "description": "base64: nonce used for the metadata ciphertext" },
+        "ciphertext": { "type": "string", "description": "base64: XChaCha20-Poly1305 over JSON {path, mimeType, hash} where hash is sha256 hex of the plaintext bytes" }
       }
     },
     "plaintext": {

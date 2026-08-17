@@ -75,15 +75,29 @@ export interface AttachmentMetaPlaintext {
   mimeType: string;
 }
 
+export interface EncryptedAttachmentMeta {
+  keyId: string;
+  /** base64: per-attachment key wrapped by master key */
+  wrappedKey: string;
+  keyNonce: string;
+  /** base64: nonce for the blob ciphertext */
+  blobNonce: string;
+  /** base64: nonce for the metadata ciphertext */
+  metaNonce: string;
+  /** base64: XChaCha20-Poly1305 over JSON {path, mimeType, hash} */
+  ciphertext: string;
+}
+
 export interface AttachmentRecord {
   $type: 'app.notesky.attachment';
   vault: string;
   formatVersion: number;
   createdAt?: string;
   updatedAt: string;
+  /** sha256 hex of the stored blob bytes (ciphertext when encrypted) */
   contentHash: string;
   blob: unknown; // BlobRef, provided by @atproto/api at upload time
-  meta: EncryptedContent | AttachmentMetaPlaintext;
+  meta: EncryptedAttachmentMeta | AttachmentMetaPlaintext;
 }
 
 export interface FolderMetaPlaintext {
