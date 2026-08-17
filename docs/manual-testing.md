@@ -42,7 +42,7 @@ Cleanup afterwards: `docker rm -f notesky-test-pds && docker volume rm notesky-p
 NOTESKY_PDS_URL=http://localhost:3000 \
 NOTESKY_HANDLE=tester.test \
 NOTESKY_PASSWORD=notesky-test-pass \
-npx vitest run tests/obsidian/pds-client.integration.test.ts tests/sync/engine-live.integration.test.ts
+pnpm vitest run tests/obsidian/pds-client.integration.test.ts tests/sync/engine-live.integration.test.ts
 ```
 
 Both must pass before bothering with the UI steps.
@@ -53,7 +53,7 @@ Two vaults simulate two devices. **Give them different folder names** — local
 sync state is stored per vault name.
 
 ```bash
-npm run build   # produces main.js
+pnpm run build   # produces main.js
 
 mkdir -p ~/notesky-dev/{vault-a,vault-b}
 # Open each folder once in Obsidian (Open folder as vault) so .obsidian exists,
@@ -149,6 +149,6 @@ Expect base64 ciphertext only — no note text, no paths, no titles.
 
 ## 8. Acceptance (from the plan's "Done means")
 
-`npm run typecheck` clean; `npx vitest run` green; sections 4–6 above pass;
+`pnpm run typecheck` clean; `pnpm vitest run` green; sections 4–6 above pass;
 finally, two real devices (desktop + one mobile) against a test Bluesky
 account — same steps as sections 4–5, without the PDS URL override.
