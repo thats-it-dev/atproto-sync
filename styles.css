@@ -32,7 +32,14 @@
 
 .notesky-status[data-notesky-status='syncing'] .svg-icon {
   color: var(--interactive-accent);
-  animation: notesky-spin 1.2s linear infinite;
+  /* The composed cloud-sync icon can't rotate just its arrows, so it breathes. */
+  animation: notesky-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes notesky-pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .notesky-status[data-notesky-status='error'] .svg-icon {

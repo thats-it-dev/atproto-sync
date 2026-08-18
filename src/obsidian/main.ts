@@ -1,4 +1,4 @@
-import { Notice, Plugin, setIcon } from 'obsidian';
+import { Notice, Plugin } from 'obsidian';
 import { Agent } from '@atproto/api';
 import { SyncEngine } from '../sync/engine';
 import { fromB64 } from '../crypto/box';
@@ -6,7 +6,7 @@ import { NoteskyOAuth } from './oauth';
 import { IndexedDbStore } from './store';
 import { ObsidianVaultAdapter } from './vault-adapter';
 import { RealPdsClient, login } from './pds-client';
-import { NOTESKY_ICON, registerNoteskyIcon } from './ui';
+import { setIconWithFallback } from './ui';
 import { NoteskySettingTab } from './settings';
 import { SetupWizard } from './setup-wizard';
 import { registerPublishCommands } from './publish';
@@ -80,7 +80,6 @@ export default class NoteskyPlugin extends Plugin {
     const saved = await this.store.loadSettings();
     this.settings = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
 
-    registerNoteskyIcon();
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass('mod-clickable', 'notesky-status');
     this.statusBar.addEventListener('click', () => {
@@ -259,12 +258,12 @@ export default class NoteskyPlugin extends Plugin {
       ? ` · ${this.lastSyncAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
       : '';
     const config = {
-      idle: { icon: NOTESKY_ICON, tip: `Notesky: synced${time} — click to sync now` },
-      syncing: { icon: 'refresh-cw', tip: 'Notesky: syncing…' },
-      error: { icon: 'cloud-off', tip: 'Notesky: sync error — click to retry' },
-      setup: { icon: 'cloud-off', tip: 'Notesky: setup needed — click to begin' },
+      idle: { icon: 'cloud-check', fallback: 'cloud', tip: `Notesky: synced${time} — click to sync now` },
+      syncing: { icon: 'cloud-sync', fallback: 'refresh-cw', tip: 'Notesky: syncing…' },
+      error: { icon: 'cloud-alert', fallback: 'cloud-off', tip: 'Notesky: sync error — click to retry' },
+      setup: { icon: 'cloud-off', fallback: 'cloud-off', tip: 'Notesky: setup needed — click to begin' },
     }[state];
-    setIcon(this.statusBar, config.icon);
+    setIconWithFallback(this.statusBar, config.icon, config.fallback);
     this.statusBar.setAttr('aria-label', config.tip);
     this.statusBar.setAttr('data-notesky-status', state);
   }
