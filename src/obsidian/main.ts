@@ -41,17 +41,26 @@ export const DEFAULT_SETTINGS: NoteskySettings = {
 
 const DEBOUNCE_MS = 2000;
 
+export type AuthPhase = 'pending' | 'complete' | 'failed';
+
 export default class NoteskyPlugin extends Plugin {
   settings: NoteskySettings = { ...DEFAULT_SETTINGS };
   store!: IndexedDbStore;
   pdsClient: RealPdsClient | null = null;
   oauth = new NoteskyOAuth();
-  private authListeners = new Set<() => void>();
+  private authListeners = new Set<(phase: AuthPhase) => void>();
 
-  /** Subscribe to completed sign-ins (e.g. the OAuth protocol-handler return). */
-  onAuthChanged(listener: () => void): () => void {
+  /**
+   * Subscribe to OAuth protocol-handler progress: 'pending' when the browser
+   * returns and the token exchange starts, then 'complete' or 'failed'.
+   */
+  onAuthChanged(listener: (phase: AuthPhase) => void): () => void {
     this.authListeners.add(listener);
     return () => this.authListeners.delete(listener);
+  }
+
+  private notifyAuth(phase: AuthPhase): void {
+    this.authListeners.forEach((listener) => listener(phase));
   }
   private engine: SyncEngine | null = null;
 
@@ -88,6 +97,7 @@ export default class NoteskyPlugin extends Plugin {
 
     this.registerObsidianProtocolHandler('notesky-auth', (params) => {
       void (async () => {
+        this.notifyAuth('pending');
         try {
           const session = await this.oauth.completeCallback(params);
           this.settings.authMode = 'oauth';
@@ -96,9 +106,10 @@ export default class NoteskyPlugin extends Plugin {
           this.pdsClient = new RealPdsClient(new Agent(session), session.did);
           await this.saveSettings();
           new Notice(`Notesky: signed in as ${session.did}`);
-          this.authListeners.forEach((listener) => listener());
+          this.notifyAuth('complete');
           await this.initEngine();
         } catch (err) {
+          this.notifyAuth('failed');
           new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
         }
       })();

@@ -2,7 +2,7 @@ import { App, Modal, Notice, Setting } from 'obsidian';
 import { login } from './pds-client';
 import { WrongPassphraseError, setupVaultEncryption, vaultRecordExists } from './onboarding';
 import { PASSPHRASE_WARNING } from './settings';
-import { createLinkButton } from './ui';
+import { createBusyRow, createLinkButton } from './ui';
 import type NoteskyPlugin from './main';
 
 type Step = 'login' | 'browser' | 'passphrase' | 'done';
@@ -15,6 +15,7 @@ export class SetupWizard extends Modal {
   private passphrase = '';
   private useAppPassword = false;
   private busy = false;
+  private busyMessage: string | null = null;
   private laterDevice: boolean | null = null;
   private authUrl: string | null = null;
   private offAuthChanged: (() => void) | null = null;
@@ -32,12 +33,16 @@ export class SetupWizard extends Modal {
     const hasAuth = s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
     if (s.masterKeyB64 && s.vaultRkey && hasAuth) this.step = 'done';
     else if (hasAuth) this.step = 'passphrase';
-    // OAuth completes out-of-band via the protocol handler; advance when it does.
-    this.offAuthChanged = this.plugin.onAuthChanged(() => {
-      if (this.step === 'login' || this.step === 'browser') {
-        this.step = 'passphrase';
-        this.render();
+    // OAuth completes out-of-band via the protocol handler; reflect its progress.
+    this.offAuthChanged = this.plugin.onAuthChanged((phase) => {
+      if (this.step !== 'login' && this.step !== 'browser') return;
+      if (phase === 'pending') {
+        this.busyMessage = 'Completing sign-in…';
+      } else {
+        this.busyMessage = null;
+        if (phase === 'complete') this.step = 'passphrase';
       }
+      this.render();
     });
     this.render();
   }
@@ -54,6 +59,28 @@ export class SetupWizard extends Modal {
     else if (this.step === 'browser') this.renderBrowser();
     else if (this.step === 'passphrase') this.renderPassphrase();
     else this.renderDone();
+
+    if (this.busyMessage) {
+      createBusyRow(contentEl, this.busyMessage);
+      for (const el of contentEl.querySelectorAll('button, input')) {
+        (el as HTMLButtonElement | HTMLInputElement).disabled = true;
+      }
+    }
+  }
+
+  /** Run an async transition with a spinner shown and inputs disabled. */
+  private async withBusy(message: string, fn: () => Promise<void>): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    this.busyMessage = message;
+    this.render();
+    try {
+      await fn();
+    } finally {
+      this.busy = false;
+      this.busyMessage = null;
+      this.render();
+    }
   }
 
   // ── Step 1: sign in ──────────────────────────────────────────────────────
@@ -113,19 +140,16 @@ export class SetupWizard extends Modal {
       new Notice('Notesky: enter your handle first.');
       return;
     }
-    if (this.busy) return;
-    this.busy = true;
-    try {
-      this.plugin.settings.identifier = this.handle;
-      await this.plugin.saveSettings();
-      this.authUrl = await this.plugin.oauth.createAuthUrl(this.handle);
-      this.step = 'browser';
-      this.render();
-    } catch (err) {
-      new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
-    } finally {
-      this.busy = false;
-    }
+    await this.withBusy('Contacting your server…', async () => {
+      try {
+        this.plugin.settings.identifier = this.handle;
+        await this.plugin.saveSettings();
+        this.authUrl = await this.plugin.oauth.createAuthUrl(this.handle);
+        this.step = 'browser';
+      } catch (err) {
+        new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
+      }
+    });
   }
 
   // ── Step 2: browser handoff ──────────────────────────────────────────────
@@ -152,35 +176,32 @@ export class SetupWizard extends Modal {
       new Notice('Notesky: enter your handle and app password.');
       return;
     }
-    if (this.busy) return;
-    this.busy = true;
-    try {
-      const s = this.plugin.settings;
-      this.plugin.pdsClient = await login({
-        identifier: this.handle,
-        password: this.appPassword,
-        pdsUrl: s.pdsUrlOverride || undefined,
-      });
-      s.identifier = this.handle;
-      s.appPassword = this.appPassword;
-      s.authMode = 'app-password';
-      await this.plugin.saveSettings();
-      this.step = 'passphrase';
-      this.render();
-    } catch (err) {
-      new Notice(`Notesky: login failed — ${err instanceof Error ? err.message : err}`);
-    } finally {
-      this.busy = false;
-    }
+    await this.withBusy('Signing in…', async () => {
+      try {
+        const s = this.plugin.settings;
+        this.plugin.pdsClient = await login({
+          identifier: this.handle,
+          password: this.appPassword,
+          pdsUrl: s.pdsUrlOverride || undefined,
+        });
+        s.identifier = this.handle;
+        s.appPassword = this.appPassword;
+        s.authMode = 'app-password';
+        await this.plugin.saveSettings();
+        this.step = 'passphrase';
+      } catch (err) {
+        new Notice(`Notesky: login failed — ${err instanceof Error ? err.message : err}`);
+      }
+    });
   }
 
   // ── Step 2: passphrase ───────────────────────────────────────────────────
   private renderPassphrase(): void {
     const { contentEl } = this;
     contentEl.createEl('h2', { text: 'Encryption passphrase' });
-    const intro = contentEl.createEl('p', { text: 'Checking your account…' });
 
     if (this.laterDevice === null) {
+      createBusyRow(contentEl, 'Checking your account…');
       void vaultRecordExists(this.plugin)
         .then((exists) => {
           this.laterDevice = exists;
@@ -191,18 +212,18 @@ export class SetupWizard extends Modal {
         });
       return;
     }
-    intro.setText(
-      this.laterDevice
+    contentEl.createEl('p', {
+      text: this.laterDevice
         ? 'This account already has an encrypted vault. Enter the same passphrase you chose on your first device.'
-        : 'Choose a passphrase. Every note is encrypted with it before it leaves this device.'
-    );
+        : 'Choose a passphrase. Every note is encrypted with it before it leaves this device.',
+    });
     if (!this.laterDevice) {
       contentEl.createEl('p', { text: PASSPHRASE_WARNING, cls: 'mod-warning' });
     }
 
     new Setting(contentEl).setName('Passphrase').addText((t) => {
       t.inputEl.type = 'password';
-      t.onChange((v) => (this.passphrase = v));
+      t.setValue(this.passphrase).onChange((v) => (this.passphrase = v));
       t.inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') void this.submitPassphrase();
       });
@@ -221,22 +242,19 @@ export class SetupWizard extends Modal {
       new Notice('Notesky: enter a passphrase.');
       return;
     }
-    if (this.busy) return;
-    this.busy = true;
-    try {
-      await setupVaultEncryption(this.plugin, this.passphrase);
-      this.step = 'done';
-      this.render();
-      await this.plugin.initEngine();
-    } catch (err) {
-      if (err instanceof WrongPassphraseError) {
-        new Notice('Notesky: wrong passphrase for this vault — try again.');
-      } else {
-        new Notice(`Notesky: ${err instanceof Error ? err.message : err}`);
+    await this.withBusy(this.laterDevice ? 'Unlocking your vault…' : 'Creating your vault…', async () => {
+      try {
+        await setupVaultEncryption(this.plugin, this.passphrase);
+        this.step = 'done';
+        await this.plugin.initEngine();
+      } catch (err) {
+        if (err instanceof WrongPassphraseError) {
+          new Notice('Notesky: wrong passphrase for this vault — try again.');
+        } else {
+          new Notice(`Notesky: ${err instanceof Error ? err.message : err}`);
+        }
       }
-    } finally {
-      this.busy = false;
-    }
+    });
   }
 
   // ── Step 3: done ─────────────────────────────────────────────────────────
