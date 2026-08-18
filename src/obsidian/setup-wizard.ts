@@ -1,12 +1,13 @@
-import { App, Modal, Notice, Platform, Setting } from 'obsidian';
+import { App, Modal, Notice, Setting } from 'obsidian';
 import { login } from './pds-client';
 import { WrongPassphraseError, setupVaultEncryption, vaultRecordExists } from './onboarding';
 import { PASSPHRASE_WARNING } from './settings';
+import { createLinkButton } from './ui';
 import type NoteskyPlugin from './main';
 
-type Step = 'login' | 'passphrase' | 'done';
+type Step = 'login' | 'browser' | 'passphrase' | 'done';
 
-/** Guided first-run setup: sign in → passphrase → syncing. */
+/** Guided first-run setup: sign in → browser handoff → passphrase → syncing. */
 export class SetupWizard extends Modal {
   private step: Step = 'login';
   private handle = '';
@@ -15,6 +16,7 @@ export class SetupWizard extends Modal {
   private useAppPassword = false;
   private busy = false;
   private laterDevice: boolean | null = null;
+  private authUrl: string | null = null;
   private offAuthChanged: (() => void) | null = null;
 
   constructor(
@@ -32,7 +34,7 @@ export class SetupWizard extends Modal {
     else if (hasAuth) this.step = 'passphrase';
     // OAuth completes out-of-band via the protocol handler; advance when it does.
     this.offAuthChanged = this.plugin.onAuthChanged(() => {
-      if (this.step === 'login') {
+      if (this.step === 'login' || this.step === 'browser') {
         this.step = 'passphrase';
         this.render();
       }
@@ -49,6 +51,7 @@ export class SetupWizard extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     if (this.step === 'login') this.renderLogin();
+    else if (this.step === 'browser') this.renderBrowser();
     else if (this.step === 'passphrase') this.renderPassphrase();
     else this.renderDone();
   }
@@ -56,7 +59,7 @@ export class SetupWizard extends Modal {
   // ── Step 1: sign in ──────────────────────────────────────────────────────
   private renderLogin(): void {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'Set up Notesky Sync (1/2)' });
+    contentEl.createEl('h2', { text: 'Set up Notesky Sync' });
     contentEl.createEl('p', {
       text: 'Sign in with the account your vault will sync to.',
     });
@@ -110,25 +113,38 @@ export class SetupWizard extends Modal {
       new Notice('Notesky: enter your handle first.');
       return;
     }
-    this.plugin.settings.identifier = this.handle;
-    await this.plugin.saveSettings();
+    if (this.busy) return;
+    this.busy = true;
     try {
-      const url = await this.plugin.oauth.createAuthUrl(this.handle);
-      const { contentEl } = this;
-      if (Platform.isMobileApp) {
-        // A real tap on a real anchor is required for the browser to open.
-        const p = contentEl.createEl('p');
-        const link = p.createEl('a', { text: 'Tap to open your login page', href: url });
-        link.setAttr('target', '_blank');
-        link.setAttr('rel', 'noopener');
-        link.style.fontSize = '1.1em';
-      } else {
-        window.open(url);
-        contentEl.createEl('p', { text: 'Continue in your browser — this window will advance automatically.' });
-      }
+      this.plugin.settings.identifier = this.handle;
+      await this.plugin.saveSettings();
+      this.authUrl = await this.plugin.oauth.createAuthUrl(this.handle);
+      this.step = 'browser';
+      this.render();
     } catch (err) {
       new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
+    } finally {
+      this.busy = false;
     }
+  }
+
+  // ── Step 2: browser handoff ──────────────────────────────────────────────
+  private renderBrowser(): void {
+    const { contentEl } = this;
+    contentEl.createEl('h2', { text: 'Continue in your browser' });
+    contentEl.createEl('p', {
+      text: `Your sign-in for ${this.handle} is ready. Approve it in the browser and Obsidian will pick up right here.`,
+    });
+
+    // A real anchor: Obsidian routes it to the system browser on all platforms.
+    createLinkButton(contentEl, this.authUrl!, 'Open login page');
+
+    const back = contentEl.createEl('p');
+    const backLink = back.createEl('a', { text: 'Back' });
+    backLink.addEventListener('click', () => {
+      this.step = 'login';
+      this.render();
+    });
   }
 
   private async loginWithAppPassword(): Promise<void> {
@@ -161,7 +177,7 @@ export class SetupWizard extends Modal {
   // ── Step 2: passphrase ───────────────────────────────────────────────────
   private renderPassphrase(): void {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'Encryption passphrase (2/2)' });
+    contentEl.createEl('h2', { text: 'Encryption passphrase' });
     const intro = contentEl.createEl('p', { text: 'Checking your account…' });
 
     if (this.laterDevice === null) {

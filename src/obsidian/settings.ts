@@ -2,6 +2,7 @@ import { App, Modal, Notice, Platform, PluginSettingTab, Setting } from 'obsidia
 import { login } from './pds-client';
 import { WrongPassphraseError, setupVaultEncryption } from './onboarding';
 import { SetupWizard } from './setup-wizard';
+import { createLinkButton } from './ui';
 import type NoteskyPlugin from './main';
 
 /** Mobile sign-in: the user must tap the link themselves for Safari/Chrome to open. */
@@ -19,16 +20,7 @@ class OpenBrowserModal extends Modal {
     contentEl.createEl('p', {
       text: 'Tap below to open your PDS login page. Obsidian will reopen automatically once you approve.',
     });
-    const link = contentEl.createEl('a', {
-      text: 'Open login page',
-      href: this.url,
-      cls: 'mod-cta',
-    });
-    link.setAttr('target', '_blank');
-    link.setAttr('rel', 'noopener');
-    link.style.display = 'inline-block';
-    link.style.margin = '0.5em 0 1em';
-    link.style.fontSize = '1.1em';
+    const link = createLinkButton(contentEl, this.url, 'Open login page');
     link.addEventListener('click', () => this.close());
     new Setting(contentEl).addButton((b) =>
       b.setButtonText('Copy link instead').onClick(async () => {
