@@ -53,28 +53,34 @@ export class SetupWizard extends Modal {
     this.contentEl.empty();
   }
 
+  private stepTitle(): string {
+    switch (this.step) {
+      case 'login':
+        return 'Set up Notesky Sync';
+      case 'browser':
+        return 'Continue in your browser';
+      case 'passphrase':
+        return 'Encryption passphrase';
+      case 'done':
+        return 'You’re all set';
+    }
+  }
+
   private render(): void {
     const { contentEl } = this;
     contentEl.empty();
+    contentEl.createEl('h2', { text: this.stepTitle() });
+
+    // While work runs the form disappears entirely: just title + spinner.
+    if (this.busyMessage) {
+      createBusyRow(contentEl, this.busyMessage);
+      return;
+    }
+
     if (this.step === 'login') this.renderLogin();
     else if (this.step === 'browser') this.renderBrowser();
     else if (this.step === 'passphrase') this.renderPassphrase();
     else this.renderDone();
-
-    if (this.busyMessage) {
-      for (const el of contentEl.querySelectorAll('button, input')) {
-        (el as HTMLButtonElement | HTMLInputElement).disabled = true;
-      }
-    }
-  }
-
-  /** Render action controls — or, while busy, the spinner in their place. */
-  private actionArea(build: () => void): void {
-    if (this.busyMessage) {
-      createBusyRow(this.contentEl, this.busyMessage);
-    } else {
-      build();
-    }
   }
 
   /** Run an async transition with a spinner shown and inputs disabled. */
@@ -95,7 +101,6 @@ export class SetupWizard extends Modal {
   // ── Step 1: sign in ──────────────────────────────────────────────────────
   private renderLogin(): void {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'Set up Notesky Sync' });
     contentEl.createEl('p', {
       text: 'Sign in with the account your vault will sync to.',
     });
@@ -108,19 +113,17 @@ export class SetupWizard extends Modal {
       );
 
     if (!this.useAppPassword) {
-      this.actionArea(() => {
-        new Setting(contentEl).addButton((b) =>
-          b
-            .setButtonText('Sign in with Bluesky')
-            .setCta()
-            .onClick(() => void this.startOAuth())
-        );
-        const alt = contentEl.createEl('p');
-        const link = alt.createEl('a', { text: 'Use an app password instead' });
-        link.addEventListener('click', () => {
-          this.useAppPassword = true;
-          this.render();
-        });
+      new Setting(contentEl).addButton((b) =>
+        b
+          .setButtonText('Sign in with Bluesky')
+          .setCta()
+          .onClick(() => void this.startOAuth())
+      );
+      const alt = contentEl.createEl('p');
+      const link = alt.createEl('a', { text: 'Use an app password instead' });
+      link.addEventListener('click', () => {
+        this.useAppPassword = true;
+        this.render();
       });
     } else {
       new Setting(contentEl)
@@ -130,21 +133,19 @@ export class SetupWizard extends Modal {
           t.inputEl.type = 'password';
           t.setValue(this.appPassword).onChange((v) => (this.appPassword = v.trim()));
         });
-      this.actionArea(() => {
-        new Setting(contentEl)
-          .addButton((b) =>
-            b
-              .setButtonText('Log in')
-              .setCta()
-              .onClick(() => void this.loginWithAppPassword())
-          )
-          .addButton((b) =>
-            b.setButtonText('Back').onClick(() => {
-              this.useAppPassword = false;
-              this.render();
-            })
-          );
-      });
+      new Setting(contentEl)
+        .addButton((b) =>
+          b
+            .setButtonText('Log in')
+            .setCta()
+            .onClick(() => void this.loginWithAppPassword())
+        )
+        .addButton((b) =>
+          b.setButtonText('Back').onClick(() => {
+            this.useAppPassword = false;
+            this.render();
+          })
+        );
     }
   }
 
@@ -168,21 +169,18 @@ export class SetupWizard extends Modal {
   // ── Step 2: browser handoff ──────────────────────────────────────────────
   private renderBrowser(): void {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'Continue in your browser' });
     contentEl.createEl('p', {
       text: `Your sign-in for ${this.handle} is ready. Approve it in the browser and Obsidian will pick up right here.`,
     });
 
-    this.actionArea(() => {
-      // A real anchor: Obsidian routes it to the system browser on all platforms.
-      createLinkButton(contentEl, this.authUrl!, 'Open login page');
+    // A real anchor: Obsidian routes it to the system browser on all platforms.
+    createLinkButton(contentEl, this.authUrl!, 'Open login page');
 
-      const back = contentEl.createEl('p');
-      const backLink = back.createEl('a', { text: 'Back' });
-      backLink.addEventListener('click', () => {
-        this.step = 'login';
-        this.render();
-      });
+    const back = contentEl.createEl('p');
+    const backLink = back.createEl('a', { text: 'Back' });
+    backLink.addEventListener('click', () => {
+      this.step = 'login';
+      this.render();
     });
   }
 
@@ -213,7 +211,6 @@ export class SetupWizard extends Modal {
   // ── Step 2: passphrase ───────────────────────────────────────────────────
   private renderPassphrase(): void {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'Encryption passphrase' });
 
     if (this.laterDevice === null) {
       createBusyRow(contentEl, 'Checking your account…');
@@ -244,14 +241,12 @@ export class SetupWizard extends Modal {
       });
     });
 
-    this.actionArea(() => {
-      new Setting(contentEl).addButton((b) =>
-        b
-          .setButtonText(this.laterDevice ? 'Unlock vault' : 'Create vault')
-          .setCta()
-          .onClick(() => void this.submitPassphrase())
-      );
-    });
+    new Setting(contentEl).addButton((b) =>
+      b
+        .setButtonText(this.laterDevice ? 'Unlock vault' : 'Create vault')
+        .setCta()
+        .onClick(() => void this.submitPassphrase())
+    );
   }
 
   private async submitPassphrase(): Promise<void> {
@@ -277,7 +272,6 @@ export class SetupWizard extends Modal {
   // ── Step 3: done ─────────────────────────────────────────────────────────
   private renderDone(): void {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: 'You’re all set' });
     contentEl.createEl('p', {
       text: 'Notesky is syncing this vault, end-to-end encrypted. The status bar shows sync state; everything else lives in Settings → Notesky Sync.',
     });
