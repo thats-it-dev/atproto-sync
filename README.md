@@ -1,4 +1,4 @@
-# Notesky Sync
+# ATProto Sync
 
 Sync your Obsidian vault to your own [ATProto](https://atproto.com) PDS — the
 same account you use for Bluesky, Blacksky, Eurosky, or a self-hosted server.

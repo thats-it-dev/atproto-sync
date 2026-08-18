@@ -63,7 +63,7 @@ export class SetupWizard extends Modal {
   private stepTitle(): string {
     switch (this.step) {
       case 'login':
-        return 'Set up Notesky Sync';
+        return 'Set up ATProto Sync';
       case 'browser':
         return 'Continue in your browser';
       case 'passphrase':
