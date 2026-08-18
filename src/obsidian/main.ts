@@ -141,7 +141,10 @@ export default class AtprotoSyncPlugin extends Plugin {
           this.notifyAuth('complete');
           if (!this.settings.masterKeyB64 || !this.settings.vaultRkey) {
             // Setup isn't done until the passphrase exists: put the wizard
-            // (at its passphrase step) in front of the user.
+            // (at its passphrase step) in front of the user. The Settings
+            // dialog outranks modals in z-order, so close it first or the
+            // wizard opens invisibly behind it.
+            (this.app as unknown as { setting?: { close?: () => void } }).setting?.close?.();
             if (!this.activeWizard) new SetupWizard(this.app, this).open();
           } else {
             await this.initEngine();
