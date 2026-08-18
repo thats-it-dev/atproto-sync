@@ -2,8 +2,7 @@
 
 Sync your Obsidian vault to your own [ATProto](https://atproto.com) PDS — the
 same account you use for Bluesky, Blacksky, Eurosky, or a self-hosted server.
-End-to-end encrypted by default, with per-note publishing when you want
-something public.
+End-to-end encrypted by default.
 
 - **Your storage, your account.** Notes live in your PDS repo as
   `app.notesky.*` records. No third-party sync server, nothing to trust but
@@ -16,7 +15,7 @@ something public.
   character-level merging (the same algorithm Obsidian Sync uses). True
   conflicts never lose data: the losing version is kept locally in
   `Notesky Conflicts/`.
-- **Publish per note.** Toggle a note public and it becomes a plaintext record
+- **coming soon - Publish per note.** Toggle a note public and it becomes a plaintext record
   (with its embedded images) that anyone — or any app — can read from your
   PDS. Toggle it back and it re-encrypts with a fresh key.
 
