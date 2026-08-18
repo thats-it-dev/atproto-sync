@@ -1,6 +1,12 @@
 import { App, Modal, Notice, Setting } from 'obsidian';
 import { login } from './pds-client';
-import { WrongPassphraseError, setupVaultEncryption, vaultRecordExists } from './onboarding';
+import {
+  VaultInfo,
+  WrongPassphraseError,
+  createVault,
+  listVaults,
+  unlockVault,
+} from './onboarding';
 import { PASSPHRASE_WARNING } from './settings';
 import { createBusyRow, createLinkButton } from './ui';
 import type NoteskyPlugin from './main';
@@ -16,7 +22,8 @@ export class SetupWizard extends Modal {
   private useAppPassword = false;
   private busy = false;
   private busyMessage: string | null = null;
-  private laterDevice: boolean | null = null;
+  private vaults: VaultInfo[] | null = null;
+  private targetVault: VaultInfo | null = null;
   private authUrl: string | null = null;
   private offAuthChanged: (() => void) | null = null;
 
@@ -60,8 +67,8 @@ export class SetupWizard extends Modal {
       case 'browser':
         return 'Continue in your browser';
       case 'passphrase':
-        if (this.laterDevice === null) return 'Vault passphrase';
-        return this.laterDevice ? 'Enter vault passphrase' : 'Create vault passphrase';
+        if (this.vaults === null) return 'Vault passphrase';
+        return this.targetVault ? 'Enter vault passphrase' : 'Create vault passphrase';
       case 'done':
         return 'You’re all set';
     }
@@ -213,11 +220,14 @@ export class SetupWizard extends Modal {
   private renderPassphrase(): void {
     const { contentEl } = this;
 
-    if (this.laterDevice === null) {
+    if (this.vaults === null) {
       createBusyRow(contentEl, 'Checking your account…');
-      void vaultRecordExists(this.plugin)
-        .then((exists) => {
-          this.laterDevice = exists;
+      void listVaults(this.plugin)
+        .then((vaults) => {
+          this.vaults = vaults;
+          // Folder name is the vault identity: bind to the match by default.
+          this.targetVault =
+            vaults.find((v) => v.name === this.plugin.app.vault.getName()) ?? null;
           this.render();
         })
         .catch((err) => {
@@ -225,12 +235,16 @@ export class SetupWizard extends Modal {
         });
       return;
     }
-    contentEl.createEl('p', {
-      text: this.laterDevice
-        ? 'Your vault data is encrypted whenever it leaves your device. Enter the passphrase you chose when you first set up this vault.'
-        : 'Your vault data is encrypted whenever it leaves your device. Choose the passphrase that will protect it.',
-    });
-    if (!this.laterDevice) {
+
+    const folderName = this.plugin.app.vault.getName();
+    if (this.targetVault) {
+      contentEl.createEl('p', {
+        text: `Your vault data is encrypted whenever it leaves your device. Enter the passphrase you chose when you first set up “${this.targetVault.name}”.`,
+      });
+    } else {
+      contentEl.createEl('p', {
+        text: `Your vault data is encrypted whenever it leaves your device. Choose the passphrase that will protect “${folderName}”.`,
+      });
       contentEl.createEl('p', { text: PASSPHRASE_WARNING, cls: 'mod-warning' });
     }
 
@@ -244,7 +258,7 @@ export class SetupWizard extends Modal {
 
     new Setting(contentEl).addButton((b) =>
       b
-        .setButtonText(this.laterDevice ? 'Unlock vault' : 'Create vault')
+        .setButtonText(this.targetVault ? 'Unlock vault' : 'Create vault')
         .setCta()
         .onClick(() => void this.submitPassphrase())
     );
@@ -255,9 +269,14 @@ export class SetupWizard extends Modal {
       new Notice('Notesky: enter a passphrase.');
       return;
     }
-    await this.withBusy(this.laterDevice ? 'Unlocking your vault…' : 'Creating your vault…', async () => {
+    const target = this.targetVault;
+    await this.withBusy(target ? 'Unlocking your vault…' : 'Creating your vault…', async () => {
       try {
-        await setupVaultEncryption(this.plugin, this.passphrase);
+        if (target) {
+          await unlockVault(this.plugin, target.rkey, this.passphrase);
+        } else {
+          await createVault(this.plugin, this.plugin.app.vault.getName(), this.passphrase);
+        }
         this.step = 'done';
         await this.plugin.initEngine();
       } catch (err) {

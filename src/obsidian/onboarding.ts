@@ -26,10 +26,19 @@ export async function ensurePdsClient(plugin: NoteskyPlugin): Promise<RealPdsCli
   return plugin.pdsClient;
 }
 
-/** Whether this account already has a vault record (i.e. this is a later device). */
-export async function vaultRecordExists(plugin: NoteskyPlugin): Promise<boolean> {
+export interface VaultInfo {
+  rkey: string;
+  name: string;
+  createdAt?: string;
+}
+
+/** All vault records on this account. Names are plaintext by design (the chooser needs them). */
+export async function listVaults(plugin: NoteskyPlugin): Promise<VaultInfo[]> {
   const pds = await ensurePdsClient(plugin);
-  return (await pds.listRecords(VAULT_COLLECTION)).length > 0;
+  return (await pds.listRecords(VAULT_COLLECTION)).map((r) => {
+    const rec = r.value as VaultRecord;
+    return { rkey: r.rkey, name: rec.name, createdAt: rec.createdAt };
+  });
 }
 
 export class WrongPassphraseError extends Error {
@@ -39,49 +48,51 @@ export class WrongPassphraseError extends Error {
   }
 }
 
-/**
- * First device: derive a master key and publish the vault record.
- * Later devices: verify the passphrase against the existing record.
- * Persists the derived key + vault rkey in settings on success.
- */
-export async function setupVaultEncryption(
+/** Create a new vault record and bind this device to it. */
+export async function createVault(
   plugin: NoteskyPlugin,
+  name: string,
   passphrase: string
-): Promise<'created' | 'verified'> {
+): Promise<void> {
   const pds = await ensurePdsClient(plugin);
   const s = plugin.settings;
-  const vaults = await pds.listRecords(VAULT_COLLECTION);
+  const salt = await generateSalt();
+  const master = await deriveMasterKey(passphrase, salt, DEFAULT_KDF_PARAMS);
+  const check = await makeCheckValue(master);
+  const record: VaultRecord = {
+    $type: 'app.notesky.vault',
+    name,
+    formatVersion: 1,
+    kdf: {
+      alg: 'argon2id13',
+      saltB64: await toB64(salt),
+      opsLimit: DEFAULT_KDF_PARAMS.opsLimit,
+      memLimit: DEFAULT_KDF_PARAMS.memLimit,
+    },
+    checkValue: {
+      nonce: await toB64(check.nonce),
+      ciphertext: await toB64(check.ciphertext),
+    },
+    createdAt: new Date().toISOString(),
+  };
+  const rkey = `vault${Date.now().toString(36)}`;
+  await pds.putRecord(VAULT_COLLECTION, rkey, record, null);
+  s.vaultRkey = rkey;
+  s.masterKeyB64 = await toB64(master);
+  await plugin.saveSettings();
+}
 
-  if (vaults.length === 0) {
-    const salt = await generateSalt();
-    const master = await deriveMasterKey(passphrase, salt, DEFAULT_KDF_PARAMS);
-    const check = await makeCheckValue(master);
-    const record: VaultRecord = {
-      $type: 'app.notesky.vault',
-      name: plugin.app.vault.getName(),
-      formatVersion: 1,
-      kdf: {
-        alg: 'argon2id13',
-        saltB64: await toB64(salt),
-        opsLimit: DEFAULT_KDF_PARAMS.opsLimit,
-        memLimit: DEFAULT_KDF_PARAMS.memLimit,
-      },
-      checkValue: {
-        nonce: await toB64(check.nonce),
-        ciphertext: await toB64(check.ciphertext),
-      },
-      createdAt: new Date().toISOString(),
-    };
-    const rkey = `vault${Date.now().toString(36)}`;
-    await pds.putRecord(VAULT_COLLECTION, rkey, record, null);
-    s.vaultRkey = rkey;
-    s.masterKeyB64 = await toB64(master);
-    await plugin.saveSettings();
-    return 'created';
-  }
-
-  const { rkey, value } = vaults[0];
-  const rec = value as VaultRecord;
+/** Verify a passphrase against a specific vault record and bind this device to it. */
+export async function unlockVault(
+  plugin: NoteskyPlugin,
+  rkey: string,
+  passphrase: string
+): Promise<void> {
+  const pds = await ensurePdsClient(plugin);
+  const s = plugin.settings;
+  const record = await pds.getRecord(VAULT_COLLECTION, rkey);
+  if (!record) throw new Error('That vault no longer exists on your account.');
+  const rec = record.value as VaultRecord;
   const master = await deriveMasterKey(passphrase, await fromB64(rec.kdf.saltB64), {
     opsLimit: rec.kdf.opsLimit,
     memLimit: rec.kdf.memLimit,
@@ -97,5 +108,22 @@ export async function setupVaultEncryption(
   s.vaultRkey = rkey;
   s.masterKeyB64 = await toB64(master);
   await plugin.saveSettings();
-  return 'verified';
+}
+
+/**
+ * Name-based convenience used by the settings tab: bind to the vault matching
+ * this folder's name, or create one if no vault carries that name.
+ */
+export async function setupVaultEncryption(
+  plugin: NoteskyPlugin,
+  passphrase: string
+): Promise<'created' | 'verified'> {
+  const name = plugin.app.vault.getName();
+  const match = (await listVaults(plugin)).find((v) => v.name === name);
+  if (match) {
+    await unlockVault(plugin, match.rkey, passphrase);
+    return 'verified';
+  }
+  await createVault(plugin, name, passphrase);
+  return 'created';
 }
