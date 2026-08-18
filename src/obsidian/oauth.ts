@@ -10,7 +10,8 @@ const CLIENT_METADATA = {
   client_name: 'Notesky Sync',
   client_uri: 'https://notesky.app',
   redirect_uris: ['https://notesky.app/oauth/callback'] as [string],
-  scope: 'atproto transition:generic',
+  scope:
+    'atproto repo:app.notesky.note repo:app.notesky.attachment repo:app.notesky.tombstone repo:app.notesky.vault blob:*/*',
   grant_types: ['authorization_code', 'refresh_token'] as ['authorization_code', 'refresh_token'],
   response_types: ['code'] as ['code'],
   token_endpoint_auth_method: 'none' as const,
