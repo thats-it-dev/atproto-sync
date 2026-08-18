@@ -96,7 +96,7 @@ palette → "Notesky Sync: Sync now" to force either side.
 - **Conflict (collision):** make a small edit in vault-a while completely
   rewriting the whole note in vault-b; sync b, then a. Vault-a should end up
   with b's rewrite, show a notice, and hold vault-a's version under
-  `Notesky Conflicts/`. That folder must never appear in vault-b.
+  `Sync Conflicts/`. That folder must never appear in vault-b.
 - **Kill mid-sync:** put ~200 notes in vault-a (script them), quit Obsidian
   (Cmd-Q) while the progress notice is up, reopen → sync resumes and completes;
   spot-check no duplicate or missing notes in vault-b afterwards.

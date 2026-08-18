@@ -188,7 +188,7 @@ describe('property: random interleavings converge', () => {
             }
           } else {
             const bins = [...d.vault.binaries.keys()].filter(
-              (p) => !p.startsWith('Notesky Conflicts/')
+              (p) => !p.startsWith('Sync Conflicts/')
             );
             const free = binPaths.filter((p) => !d.vault.binaries.has(p));
             if (bins.length && free.length) {
@@ -213,10 +213,10 @@ describe('property: random interleavings converge', () => {
       const dumps = devices.map((d) =>
         JSON.stringify([
           [...d.vault.files.entries()]
-            .filter(([p]) => !p.startsWith('Notesky Conflicts/'))
+            .filter(([p]) => !p.startsWith('Sync Conflicts/'))
             .sort((x, y) => x[0].localeCompare(y[0])),
           [...d.vault.binaries.entries()]
-            .filter(([p]) => !p.startsWith('Notesky Conflicts/'))
+            .filter(([p]) => !p.startsWith('Sync Conflicts/'))
             .map(([p, b]) => [p, hex(b)])
             .sort((x, y) => x[0].localeCompare(y[0])),
         ])
@@ -248,7 +248,7 @@ describe('property: random interleavings converge', () => {
       // Invariant 4: binaries never merge, so every surviving binary must be
       // byte-identical to something some device actually wrote.
       for (const [path, bytes] of devices[0].vault.binaries) {
-        if (path.startsWith('Notesky Conflicts/')) continue;
+        if (path.startsWith('Sync Conflicts/')) continue;
         expect(
           writtenBinaries.has(hex(bytes)),
           `seed ${1000 + iter}: invented bytes in ${path}`

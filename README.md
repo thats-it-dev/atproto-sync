@@ -14,7 +14,7 @@ End-to-end encrypted by default.
 - **Multi-device.** Desktop and mobile converge through three-way sync with
   character-level merging (the same algorithm Obsidian Sync uses). True
   conflicts never lose data: the losing version is kept locally in
-  `Notesky Conflicts/`.
+  `Sync Conflicts/`.
 - **coming soon - Publish per note.** Toggle a note public and it becomes a plaintext record
   (with its embedded images) that anyone — or any app — can read from your
   PDS. Toggle it back and it re-encrypts with a fresh key.

@@ -37,7 +37,7 @@ export interface IndexStore {
 }
 
 /** Losing merge content is stashed here; device-local, never reconciled. */
-export const CONFLICTS_FOLDER = 'Notesky Conflicts';
+export const CONFLICTS_FOLDER = 'Sync Conflicts';
 
 export interface SyncEngineOptions {
   pds: PdsClient;

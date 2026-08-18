@@ -82,7 +82,7 @@ describe('attachment sync', () => {
     await a.engine.sync();
 
     expect(await a.vault.readBinary('logo.png')).toEqual(bEdit); // remote stands
-    const stash = [...a.vault.binaries.keys()].filter((p) => p.startsWith('Notesky Conflicts/'));
+    const stash = [...a.vault.binaries.keys()].filter((p) => p.startsWith('Sync Conflicts/'));
     expect(stash).toHaveLength(1);
     expect(await a.vault.readBinary(stash[0])).toEqual(aEdit);
     expect(warnings.some((w) => w.includes('logo.png'))).toBe(true);
@@ -145,7 +145,7 @@ describe('attachment sync', () => {
     await a.engine.sync();
 
     expect(warnings).toEqual([]);
-    const stash = [...a.vault.binaries.keys()].filter((p) => p.startsWith('Notesky Conflicts/'));
+    const stash = [...a.vault.binaries.keys()].filter((p) => p.startsWith('Sync Conflicts/'));
     expect(stash).toEqual([]);
     const after = await pds.listRecords(ATTACHMENT_COLLECTION);
     expect(after).toEqual(before); // same record, same cid: nothing re-pushed

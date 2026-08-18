@@ -169,7 +169,7 @@ describe('SyncEngine', () => {
     expect(await a.vault.read('essay.md')).toBe(
       'completely rewritten text that shares nothing at all\n'
     );
-    const stashPaths = [...a.vault.files.keys()].filter((p) => p.startsWith('Notesky Conflicts/'));
+    const stashPaths = [...a.vault.files.keys()].filter((p) => p.startsWith('Sync Conflicts/'));
     expect(stashPaths).toHaveLength(1);
     expect(stashPaths[0]).toContain('essay');
     expect(await a.vault.read(stashPaths[0])).toBe('alpha beta GAMMA delta\n');
@@ -179,7 +179,7 @@ describe('SyncEngine', () => {
     await a.engine.sync();
     await b.engine.sync();
     expect((await pds.listRecords('app.notesky.note')).length).toBe(1);
-    expect([...b.vault.files.keys()].some((p) => p.startsWith('Notesky Conflicts/'))).toBe(false);
+    expect([...b.vault.files.keys()].some((p) => p.startsWith('Sync Conflicts/'))).toBe(false);
   });
 
   it('round-trips a public note to another device unchanged', async () => {
