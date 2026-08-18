@@ -15,6 +15,35 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .notesky-spinner {
+    animation: none;
+    border-top-color: var(--background-modifier-border);
+    border-color: var(--interactive-accent);
+    opacity: 0.6;
+  }
+}
+
+.notesky-link-button {
+  display: block;
+  text-align: center;
+  padding: 10px 16px;
+  margin: 0.75em 0;
+  border-radius: var(--button-radius, 8px);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1.05em;
+  cursor: pointer;
+}
+
+.notesky-link-button:hover {
+  background: var(--interactive-accent-hover);
+  color: var(--text-on-accent);
+  text-decoration: none;
+}
+
 .notesky-busy-row {
   display: flex;
   align-items: center;
