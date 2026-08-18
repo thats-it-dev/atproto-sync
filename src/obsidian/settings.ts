@@ -251,15 +251,8 @@ export class AtprotoSyncSettingTab extends PluginSettingTab {
       .setDesc('Remove credentials and cached keys from this device. Notes stay on the PDS.')
       .addButton((b) =>
         b.setButtonText('Disconnect').setWarning().onClick(async () => {
-          this.plugin.settings = {
-            ...this.plugin.settings,
-            identifier: '',
-            appPassword: '',
-            masterKeyB64: '',
-            vaultRkey: '',
-          };
-          await this.plugin.saveSettings();
-          this.plugin.disconnectEngine();
+          await this.plugin.disconnectAccount();
+          new Notice('ATProto Sync: disconnected. Credentials and keys removed from this device.');
           this.display();
         })
       );

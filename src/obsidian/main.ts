@@ -241,7 +241,24 @@ export default class AtprotoSyncPlugin extends Plugin {
   disconnectEngine(): void {
     this.engine = null;
     this.pdsClient = null;
-    this.setStatus('idle');
+    this.setStatus('setup');
+  }
+
+  /** Danger-zone disconnect: revoke the session and forget everything device-local. */
+  async disconnectAccount(): Promise<void> {
+    const s = this.settings;
+    if (s.authMode === 'oauth' && s.authDid) {
+      await this.oauth.logout(s.authDid).catch(() => {});
+    }
+    s.identifier = '';
+    s.appPassword = '';
+    s.authDid = '';
+    s.authMode = 'app-password';
+    s.masterKeyB64 = '';
+    s.vaultRkey = '';
+    s.setupIncomplete = false;
+    await this.saveSettings();
+    this.disconnectEngine();
   }
 
   private scheduleSync(): void {
