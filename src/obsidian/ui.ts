@@ -16,14 +16,14 @@ export function setIconWithFallback(el: HTMLElement, icon: string, fallback: str
 
 /** Spinner + label row (styles in styles.css). */
 export function createBusyRow(parent: HTMLElement, text: string): HTMLElement {
-  const row = parent.createDiv({ cls: 'notesky-busy-row' });
-  row.createSpan({ cls: 'notesky-spinner' });
+  const row = parent.createDiv({ cls: 'atproto-sync-busy-row' });
+  row.createSpan({ cls: 'atproto-sync-spinner' });
   row.createSpan({ text });
   return row;
 }
 
 export function createLinkButton(parent: HTMLElement, url: string, label: string): HTMLAnchorElement {
-  const link = parent.createEl('a', { text: label, href: url, cls: 'notesky-link-button' });
+  const link = parent.createEl('a', { text: label, href: url, cls: 'atproto-sync-link-button' });
   link.setAttr('target', '_blank');
   link.setAttr('rel', 'noopener');
   return link;

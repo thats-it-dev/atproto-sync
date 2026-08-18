@@ -3,7 +3,7 @@ import { login } from './pds-client';
 import { WrongPassphraseError, setupVaultEncryption } from './onboarding';
 import { SetupWizard } from './setup-wizard';
 import { createLinkButton } from './ui';
-import type NoteskyPlugin from './main';
+import type AtprotoSyncPlugin from './main';
 
 /** Mobile sign-in: the user must tap the link themselves for Safari/Chrome to open. */
 class OpenBrowserModal extends Modal {
@@ -25,7 +25,7 @@ class OpenBrowserModal extends Modal {
     new Setting(contentEl).addButton((b) =>
       b.setButtonText('Copy link instead').onClick(async () => {
         await navigator.clipboard.writeText(this.url);
-        new Notice('Notesky: link copied — paste it into your browser.');
+        new Notice('ATProto Sync: link copied — paste it into your browser.');
       })
     );
   }
@@ -38,12 +38,12 @@ class OpenBrowserModal extends Modal {
 export const PASSPHRASE_WARNING =
   'If you lose this passphrase, encrypted notes on the server cannot be recovered by anyone — including us.';
 
-export class NoteskySettingTab extends PluginSettingTab {
+export class AtprotoSyncSettingTab extends PluginSettingTab {
   private passphrase = '';
 
   constructor(
     app: App,
-    private readonly plugin: NoteskyPlugin
+    private readonly plugin: AtprotoSyncPlugin
   ) {
     super(app, plugin);
   }
@@ -93,7 +93,7 @@ export class NoteskySettingTab extends PluginSettingTab {
           .setCta()
           .onClick(async () => {
             if (!s.identifier) {
-              new Notice('Notesky: enter your handle first.');
+              new Notice('ATProto Sync: enter your handle first.');
               return;
             }
             try {
@@ -104,10 +104,10 @@ export class NoteskySettingTab extends PluginSettingTab {
                 new OpenBrowserModal(this.app, url).open();
               } else {
                 window.open(url);
-                new Notice('Notesky: continue in your browser; Obsidian will reopen when done.');
+                new Notice('ATProto Sync: continue in your browser; Obsidian will reopen when done.');
               }
             } catch (err) {
-              new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
+              new Notice(`ATProto Sync: sign-in failed — ${err instanceof Error ? err.message : err}`);
             }
           })
       );
@@ -205,9 +205,9 @@ export class NoteskySettingTab extends PluginSettingTab {
               password: s.appPassword,
               pdsUrl: s.pdsUrlOverride || undefined,
             });
-            new Notice('Notesky: login OK');
+            new Notice('ATProto Sync: login OK');
           } catch (err) {
-            new Notice(`Notesky: login failed — ${err instanceof Error ? err.message : err}`);
+            new Notice(`ATProto Sync: login failed — ${err instanceof Error ? err.message : err}`);
           }
         })
       );
@@ -241,7 +241,7 @@ export class NoteskySettingTab extends PluginSettingTab {
       .addButton((b) =>
         b.setButtonText('Re-scan').setWarning().onClick(async () => {
           await this.plugin.store.save([]);
-          new Notice('Notesky: sync state cleared; next sync re-scans everything.');
+          new Notice('ATProto Sync: sync state cleared; next sync re-scans everything.');
           await this.plugin.runSync(true);
         })
       );
@@ -268,21 +268,21 @@ export class NoteskySettingTab extends PluginSettingTab {
   /** First device creates the vault record; later devices verify against it. */
   private async setupEncryption(): Promise<void> {
     if (!this.passphrase) {
-      new Notice('Notesky: enter a passphrase first.');
+      new Notice('ATProto Sync: enter a passphrase first.');
       return;
     }
     try {
       const result = await setupVaultEncryption(this.plugin, this.passphrase);
       new Notice(
         result === 'created'
-          ? 'Notesky: encryption set up. This vault is now syncing.'
-          : 'Notesky: passphrase verified. This device is now syncing.'
+          ? 'ATProto Sync: encryption set up. This vault is now syncing.'
+          : 'ATProto Sync: passphrase verified. This device is now syncing.'
       );
     } catch (err) {
       if (err instanceof WrongPassphraseError) {
-        new Notice('Notesky: wrong passphrase for this vault.');
+        new Notice('ATProto Sync: wrong passphrase for this vault.');
       } else {
-        new Notice(`Notesky: ${err instanceof Error ? err.message : err}`);
+        new Notice(`ATProto Sync: ${err instanceof Error ? err.message : err}`);
       }
       return;
     }

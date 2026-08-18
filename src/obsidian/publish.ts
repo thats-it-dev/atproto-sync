@@ -8,9 +8,9 @@ import {
   removePublicFlag,
   setPublicFlag,
 } from '../publish/frontmatter';
-import type NoteskyPlugin from './main';
+import type AtprotoSyncPlugin from './main';
 
-export function registerPublishCommands(plugin: NoteskyPlugin): void {
+export function registerPublishCommands(plugin: AtprotoSyncPlugin): void {
   plugin.addCommand({
     id: 'make-note-public',
     name: 'Make note public',
@@ -44,7 +44,7 @@ export function registerPublishCommands(plugin: NoteskyPlugin): void {
       if (!(file instanceof TFile) || file.extension !== 'md') return;
       menu.addItem((item) =>
         item
-          .setTitle('Notesky: toggle public')
+          .setTitle('ATProto Sync: toggle public')
           .setIcon('globe')
           .onClick(async () => {
             const content = await plugin.app.vault.read(file);
@@ -56,25 +56,25 @@ export function registerPublishCommands(plugin: NoteskyPlugin): void {
   );
 }
 
-async function promptMakePublic(plugin: NoteskyPlugin, file: TFile): Promise<void> {
+async function promptMakePublic(plugin: AtprotoSyncPlugin, file: TFile): Promise<void> {
   const content = await plugin.app.vault.read(file);
   new MakePublicModal(plugin.app, file, content, async (slug) => {
     await plugin.app.vault.modify(file, setPublicFlag(content, slug));
-    new Notice(`Notesky: "${file.basename}" is now public.`);
+    new Notice(`ATProto Sync: "${file.basename}" is now public.`);
     await plugin.runSync(true);
   }).open();
 }
 
-async function makePrivate(plugin: NoteskyPlugin, file: TFile): Promise<void> {
+async function makePrivate(plugin: AtprotoSyncPlugin, file: TFile): Promise<void> {
   const content = await plugin.app.vault.read(file);
   if (!isPublicNote(content)) {
-    new Notice('Notesky: this note is not public.');
+    new Notice('ATProto Sync: this note is not public.');
     return;
   }
   // Engine encryption always generates a fresh note key, so republishing
   // after this edit rotates the key as required.
   await plugin.app.vault.modify(file, removePublicFlag(content));
-  new Notice(`Notesky: "${file.basename}" is private again.`);
+  new Notice(`ATProto Sync: "${file.basename}" is private again.`);
   await plugin.runSync(true);
 }
 
@@ -130,9 +130,9 @@ class MakePublicModal extends Modal {
   }
 }
 
-async function reviewPublicNotes(plugin: NoteskyPlugin): Promise<void> {
+async function reviewPublicNotes(plugin: AtprotoSyncPlugin): Promise<void> {
   if (!plugin.pdsClient) {
-    new Notice('Notesky: connect to your PDS first.');
+    new Notice('ATProto Sync: connect to your PDS first.');
     return;
   }
   const records = await plugin.pdsClient.listRecords(NOTE_COLLECTION);
@@ -150,7 +150,7 @@ async function reviewPublicNotes(plugin: NoteskyPlugin): Promise<void> {
 
 class ReviewPublicModal extends Modal {
   constructor(
-    private readonly plugin: NoteskyPlugin,
+    private readonly plugin: AtprotoSyncPlugin,
     private readonly notes: PlaintextContent[],
     private readonly attachments: AttachmentMetaPlaintext[]
   ) {
@@ -175,7 +175,7 @@ class ReviewPublicModal extends Modal {
               await makePrivate(this.plugin, file);
               this.close();
             } else {
-              new Notice(`Notesky: local file not found for ${note.path}; sync first.`);
+              new Notice(`ATProto Sync: local file not found for ${note.path}; sync first.`);
             }
           })
         );

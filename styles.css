@@ -1,4 +1,4 @@
-.notesky-spinner {
+.atproto-sync-spinner {
   display: inline-block;
   width: 16px;
   height: 16px;
@@ -6,17 +6,17 @@
   border-top-color: var(--interactive-accent);
   border-radius: 50%;
   vertical-align: middle;
-  animation: notesky-spin 0.8s linear infinite;
+  animation: atproto-sync-spin 0.8s linear infinite;
 }
 
-@keyframes notesky-spin {
+@keyframes atproto-sync-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .notesky-spinner {
+  .atproto-sync-spinner {
     animation: none;
     border-top-color: var(--background-modifier-border);
     border-color: var(--interactive-accent);
@@ -24,39 +24,39 @@
   }
 }
 
-.notesky-status .svg-icon {
+.atproto-sync-status .svg-icon {
   width: 16px;
   height: 16px;
   vertical-align: middle;
 }
 
-.notesky-status[data-notesky-status='syncing'] .svg-icon {
+.atproto-sync-status[data-sync-status='syncing'] .svg-icon {
   color: var(--interactive-accent);
   /* The composed cloud-sync icon can't rotate just its arrows, so it breathes. */
-  animation: notesky-pulse 1.6s ease-in-out infinite;
+  animation: atproto-sync-pulse 1.6s ease-in-out infinite;
 }
 
-@keyframes notesky-pulse {
+@keyframes atproto-sync-pulse {
   50% {
     opacity: 0.35;
   }
 }
 
-.notesky-status[data-notesky-status='error'] .svg-icon {
+.atproto-sync-status[data-sync-status='error'] .svg-icon {
   color: var(--text-error);
 }
 
-.notesky-status[data-notesky-status='setup'] .svg-icon {
+.atproto-sync-status[data-sync-status='setup'] .svg-icon {
   color: var(--text-faint);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .notesky-status[data-notesky-status='syncing'] .svg-icon {
+  .atproto-sync-status[data-sync-status='syncing'] .svg-icon {
     animation: none;
   }
 }
 
-.notesky-link-button {
+.atproto-sync-link-button {
   display: block;
   text-align: center;
   padding: 10px 16px;
@@ -70,13 +70,13 @@
   cursor: pointer;
 }
 
-.notesky-link-button:hover {
+.atproto-sync-link-button:hover {
   background: var(--interactive-accent-hover);
   color: var(--text-on-accent);
   text-decoration: none;
 }
 
-.notesky-busy-row {
+.atproto-sync-busy-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -84,12 +84,12 @@
   color: var(--text-muted);
 }
 
-.notesky-wizard h2 {
+.atproto-sync-wizard h2 {
   text-align: center;
 }
 
 /* In the wizard the busy row stands in for the action buttons. */
-.notesky-wizard .notesky-busy-row {
+.atproto-sync-wizard .atproto-sync-busy-row {
   justify-content: center;
   padding: 1em 0 0.5em;
   margin: 0;

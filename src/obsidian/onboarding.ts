@@ -5,10 +5,10 @@ import { fromB64, toB64 } from '../crypto/box';
 import { makeCheckValue, verifyCheckValue } from '../crypto/check';
 import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '../crypto/keys';
 import { RealPdsClient, login } from './pds-client';
-import type NoteskyPlugin from './main';
+import type AtprotoSyncPlugin from './main';
 
 /** Build (or reuse) a PDS client from whichever auth the user completed. */
-export async function ensurePdsClient(plugin: NoteskyPlugin): Promise<RealPdsClient> {
+export async function ensurePdsClient(plugin: AtprotoSyncPlugin): Promise<RealPdsClient> {
   if (plugin.pdsClient) return plugin.pdsClient;
   const s = plugin.settings;
   if (s.authMode === 'oauth' && s.authDid) {
@@ -33,7 +33,7 @@ export interface VaultInfo {
 }
 
 /** All vault records on this account. Names are plaintext by design (the chooser needs them). */
-export async function listVaults(plugin: NoteskyPlugin): Promise<VaultInfo[]> {
+export async function listVaults(plugin: AtprotoSyncPlugin): Promise<VaultInfo[]> {
   const pds = await ensurePdsClient(plugin);
   return (await pds.listRecords(VAULT_COLLECTION)).map((r) => {
     const rec = r.value as VaultRecord;
@@ -50,7 +50,7 @@ export class WrongPassphraseError extends Error {
 
 /** Create a new vault record and bind this device to it. */
 export async function createVault(
-  plugin: NoteskyPlugin,
+  plugin: AtprotoSyncPlugin,
   name: string,
   passphrase: string
 ): Promise<void> {
@@ -84,7 +84,7 @@ export async function createVault(
 
 /** Verify a passphrase against a specific vault record and bind this device to it. */
 export async function unlockVault(
-  plugin: NoteskyPlugin,
+  plugin: AtprotoSyncPlugin,
   rkey: string,
   passphrase: string
 ): Promise<void> {
@@ -115,7 +115,7 @@ export async function unlockVault(
  * this folder's name, or create one if no vault carries that name.
  */
 export async function setupVaultEncryption(
-  plugin: NoteskyPlugin,
+  plugin: AtprotoSyncPlugin,
   passphrase: string
 ): Promise<'created' | 'verified'> {
   const name = plugin.app.vault.getName();

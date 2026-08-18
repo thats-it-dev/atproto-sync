@@ -59,7 +59,7 @@ export class IndexedDbStore implements IndexStore {
     const stored = await this.get(INDEX_KEY);
     if (stored === undefined || stored === null) return [];
     if (!Array.isArray(stored)) {
-      console.warn('Notesky: sync index is not an array; starting from empty');
+      console.warn('ATProto Sync: sync index is not an array; starting from empty');
       return [];
     }
     const entries: IndexEntry[] = [];
@@ -67,7 +67,7 @@ export class IndexedDbStore implements IndexStore {
       if (isIndexEntry(item)) {
         entries.push(item);
       } else {
-        console.warn('Notesky: skipping corrupted sync index entry', item);
+        console.warn('ATProto Sync: skipping corrupted sync index entry', item);
       }
     }
     return entries;

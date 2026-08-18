@@ -2,16 +2,16 @@ import { Notice, Plugin } from 'obsidian';
 import { Agent } from '@atproto/api';
 import { SyncEngine } from '../sync/engine';
 import { fromB64 } from '../crypto/box';
-import { NoteskyOAuth } from './oauth';
+import { AtprotoOAuth } from './oauth';
 import { IndexedDbStore } from './store';
 import { ObsidianVaultAdapter } from './vault-adapter';
 import { RealPdsClient, login } from './pds-client';
 import { setIconWithFallback } from './ui';
-import { NoteskySettingTab } from './settings';
+import { AtprotoSyncSettingTab } from './settings';
 import { SetupWizard } from './setup-wizard';
 import { registerPublishCommands } from './publish';
 
-export interface NoteskySettings {
+export interface AtprotoSyncSettings {
   identifier: string;
   appPassword: string;
   /** 'oauth' after a Sign in with Bluesky; app-password otherwise. */
@@ -28,7 +28,7 @@ export interface NoteskySettings {
   ignorePatterns: string[];
 }
 
-export const DEFAULT_SETTINGS: NoteskySettings = {
+export const DEFAULT_SETTINGS: AtprotoSyncSettings = {
   identifier: '',
   appPassword: '',
   authMode: 'app-password',
@@ -44,11 +44,11 @@ const DEBOUNCE_MS = 2000;
 
 export type AuthPhase = 'pending' | 'complete' | 'failed';
 
-export default class NoteskyPlugin extends Plugin {
-  settings: NoteskySettings = { ...DEFAULT_SETTINGS };
+export default class AtprotoSyncPlugin extends Plugin {
+  settings: AtprotoSyncSettings = { ...DEFAULT_SETTINGS };
   store!: IndexedDbStore;
   pdsClient: RealPdsClient | null = null;
-  oauth = new NoteskyOAuth();
+  oauth = new AtprotoOAuth();
   private authListeners = new Set<(phase: AuthPhase) => void>();
 
   /**
@@ -81,13 +81,13 @@ export default class NoteskyPlugin extends Plugin {
     this.settings = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
 
     this.statusBar = this.addStatusBarItem();
-    this.statusBar.addClass('mod-clickable', 'notesky-status');
+    this.statusBar.addClass('mod-clickable', 'atproto-sync-status');
     this.statusBar.addEventListener('click', () => {
       if (this.currentStatus === 'setup') new SetupWizard(this.app, this).open();
       else void this.runSync(true);
     });
     this.setStatus('idle');
-    this.addSettingTab(new NoteskySettingTab(this.app, this));
+    this.addSettingTab(new AtprotoSyncSettingTab(this.app, this));
 
     this.addCommand({
       id: 'sync-now',
@@ -101,7 +101,7 @@ export default class NoteskyPlugin extends Plugin {
     });
     registerPublishCommands(this);
 
-    this.registerObsidianProtocolHandler('notesky-auth', (params) => {
+    this.registerObsidianProtocolHandler('atproto-sync-auth', (params) => {
       void (async () => {
         this.notifyAuth('pending');
         try {
@@ -111,12 +111,12 @@ export default class NoteskyPlugin extends Plugin {
           // Ready for onboarding (vault record setup) even before the engine can start.
           this.pdsClient = new RealPdsClient(new Agent(session), session.did);
           await this.saveSettings();
-          new Notice(`Notesky: signed in as ${session.did}`);
+          new Notice(`ATProto Sync: signed in as ${session.did}`);
           this.notifyAuth('complete');
           await this.initEngine();
         } catch (err) {
           this.notifyAuth('failed');
-          new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
+          new Notice(`ATProto Sync: sign-in failed — ${err instanceof Error ? err.message : err}`);
         }
       })();
     });
@@ -177,11 +177,11 @@ export default class NoteskyPlugin extends Plugin {
         masterKey: await fromB64(s.masterKeyB64),
         vaultRkey: s.vaultRkey,
         interBatchDelayMs: 300,
-        onWarning: (msg) => new Notice(`Notesky: ${msg}`, 10_000),
+        onWarning: (msg) => new Notice(`ATProto Sync: ${msg}`, 10_000),
         onProgress: (done, total) => {
           if (total <= 50) return;
           if (!progressNotice) progressNotice = new Notice('', 0);
-          progressNotice.setMessage(`Notesky: syncing ${done}/${total}…`);
+          progressNotice.setMessage(`ATProto Sync: syncing ${done}/${total}…`);
           if (done >= total) {
             progressNotice.hide();
             progressNotice = null;
@@ -192,7 +192,7 @@ export default class NoteskyPlugin extends Plugin {
     } catch (err) {
       this.engine = null;
       this.setStatus('error');
-      new Notice(`Notesky: could not connect — ${err instanceof Error ? err.message : err}`);
+      new Notice(`ATProto Sync: could not connect — ${err instanceof Error ? err.message : err}`);
     }
   }
 
@@ -224,13 +224,13 @@ export default class NoteskyPlugin extends Plugin {
         const hasAuth =
           s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
         if (!hasAuth) {
-          new Notice('Notesky: connect your account in settings first.');
+          new Notice('ATProto Sync: connect your account in settings first.');
         } else if (!s.masterKeyB64 || !s.vaultRkey) {
           new Notice(
-            'Notesky: set your encryption passphrase in settings — syncing stays off until then.'
+            'ATProto Sync: set your encryption passphrase in settings — syncing stays off until then.'
           );
         } else {
-          new Notice('Notesky: not connected — check settings.');
+          new Notice('ATProto Sync: not connected — check settings.');
         }
       }
       return;
@@ -244,7 +244,7 @@ export default class NoteskyPlugin extends Plugin {
       this.setStatus('idle');
     } catch (err) {
       this.setStatus('error');
-      new Notice(`Notesky sync failed: ${err instanceof Error ? err.message : err}`);
+      new Notice(`ATProto Sync failed: ${err instanceof Error ? err.message : err}`);
     } finally {
       this.syncing = false;
     }
@@ -258,13 +258,13 @@ export default class NoteskyPlugin extends Plugin {
       ? ` · ${this.lastSyncAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
       : '';
     const config = {
-      idle: { icon: 'cloud-check', fallback: 'cloud', tip: `Notesky: synced${time} — click to sync now` },
-      syncing: { icon: 'cloud-sync', fallback: 'refresh-cw', tip: 'Notesky: syncing…' },
-      error: { icon: 'cloud-alert', fallback: 'cloud-off', tip: 'Notesky: sync error — click to retry' },
-      setup: { icon: 'cloud-off', fallback: 'cloud-off', tip: 'Notesky: setup needed — click to begin' },
+      idle: { icon: 'cloud-check', fallback: 'cloud', tip: `ATProto Sync: synced${time} — click to sync now` },
+      syncing: { icon: 'cloud-sync', fallback: 'refresh-cw', tip: 'ATProto Sync: syncing…' },
+      error: { icon: 'cloud-alert', fallback: 'cloud-off', tip: 'ATProto Sync: sync error — click to retry' },
+      setup: { icon: 'cloud-off', fallback: 'cloud-off', tip: 'ATProto Sync: setup needed — click to begin' },
     }[state];
     setIconWithFallback(this.statusBar, config.icon, config.fallback);
     this.statusBar.setAttr('aria-label', config.tip);
-    this.statusBar.setAttr('data-notesky-status', state);
+    this.statusBar.setAttr('data-sync-status', state);
   }
 }

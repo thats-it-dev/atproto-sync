@@ -9,7 +9,7 @@ import {
 } from './onboarding';
 import { PASSPHRASE_WARNING } from './settings';
 import { createBusyRow, createLinkButton } from './ui';
-import type NoteskyPlugin from './main';
+import type AtprotoSyncPlugin from './main';
 
 type Step = 'login' | 'browser' | 'passphrase' | 'done';
 
@@ -29,14 +29,14 @@ export class SetupWizard extends Modal {
 
   constructor(
     app: App,
-    private readonly plugin: NoteskyPlugin
+    private readonly plugin: AtprotoSyncPlugin
   ) {
     super(app);
     this.handle = plugin.settings.identifier;
   }
 
   onOpen(): void {
-    this.contentEl.addClass('notesky-wizard');
+    this.contentEl.addClass('atproto-sync-wizard');
     const s = this.plugin.settings;
     const hasAuth = s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
     if (s.masterKeyB64 && s.vaultRkey && hasAuth) this.step = 'done';
@@ -159,7 +159,7 @@ export class SetupWizard extends Modal {
 
   private async startOAuth(): Promise<void> {
     if (!this.handle) {
-      new Notice('Notesky: enter your handle first.');
+      new Notice('ATProto Sync: enter your handle first.');
       return;
     }
     await this.withBusy('Contacting your server…', async () => {
@@ -169,7 +169,7 @@ export class SetupWizard extends Modal {
         this.authUrl = await this.plugin.oauth.createAuthUrl(this.handle);
         this.step = 'browser';
       } catch (err) {
-        new Notice(`Notesky: sign-in failed — ${err instanceof Error ? err.message : err}`);
+        new Notice(`ATProto Sync: sign-in failed — ${err instanceof Error ? err.message : err}`);
       }
     });
   }
@@ -194,7 +194,7 @@ export class SetupWizard extends Modal {
 
   private async loginWithAppPassword(): Promise<void> {
     if (!this.handle || !this.appPassword) {
-      new Notice('Notesky: enter your handle and app password.');
+      new Notice('ATProto Sync: enter your handle and app password.');
       return;
     }
     await this.withBusy('Signing in…', async () => {
@@ -211,7 +211,7 @@ export class SetupWizard extends Modal {
         await this.plugin.saveSettings();
         this.step = 'passphrase';
       } catch (err) {
-        new Notice(`Notesky: login failed — ${err instanceof Error ? err.message : err}`);
+        new Notice(`ATProto Sync: login failed — ${err instanceof Error ? err.message : err}`);
       }
     });
   }
@@ -231,7 +231,7 @@ export class SetupWizard extends Modal {
           this.render();
         })
         .catch((err) => {
-          new Notice(`Notesky: ${err instanceof Error ? err.message : err}`);
+          new Notice(`ATProto Sync: ${err instanceof Error ? err.message : err}`);
         });
       return;
     }
@@ -266,7 +266,7 @@ export class SetupWizard extends Modal {
 
   private async submitPassphrase(): Promise<void> {
     if (!this.passphrase) {
-      new Notice('Notesky: enter a passphrase.');
+      new Notice('ATProto Sync: enter a passphrase.');
       return;
     }
     const target = this.targetVault;
@@ -281,9 +281,9 @@ export class SetupWizard extends Modal {
         await this.plugin.initEngine();
       } catch (err) {
         if (err instanceof WrongPassphraseError) {
-          new Notice('Notesky: wrong passphrase for this vault — try again.');
+          new Notice('ATProto Sync: wrong passphrase for this vault — try again.');
         } else {
-          new Notice(`Notesky: ${err instanceof Error ? err.message : err}`);
+          new Notice(`ATProto Sync: ${err instanceof Error ? err.message : err}`);
         }
       }
     });
@@ -293,7 +293,7 @@ export class SetupWizard extends Modal {
   private renderDone(): void {
     const { contentEl } = this;
     contentEl.createEl('p', {
-      text: 'Notesky is syncing this vault, end-to-end encrypted. The status bar shows sync state; everything else lives in Settings → Notesky Sync.',
+      text: 'ATProto Sync is syncing this vault, end-to-end encrypted. The status bar shows sync state; everything else lives in Settings → ATProto Sync.',
     });
     new Setting(contentEl).addButton((b) =>
       b.setButtonText('Done').setCta().onClick(() => this.close())

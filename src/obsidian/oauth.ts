@@ -7,7 +7,7 @@ import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
  */
 const CLIENT_METADATA = {
   client_id: 'https://notesky.app/oauth/client-metadata.json',
-  client_name: 'Notesky Sync',
+  client_name: 'ATProto Sync',
   client_uri: 'https://notesky.app',
   redirect_uris: ['https://notesky.app/oauth/callback'] as [string],
   scope:
@@ -21,11 +21,11 @@ const CLIENT_METADATA = {
 
 /**
  * ATProto OAuth for Obsidian: the flow starts in the system browser and
- * returns via the obsidian://notesky-auth protocol handler (bounced through
+ * returns via the obsidian://atproto-sync-auth protocol handler (bounced through
  * https://notesky.app/oauth/callback). BrowserOAuthClient persists sessions
  * and DPoP keys in IndexedDB and auto-refreshes tokens.
  */
-export class NoteskyOAuth {
+export class AtprotoOAuth {
   private readonly client: BrowserOAuthClient;
 
   constructor() {
@@ -46,7 +46,7 @@ export class NoteskyOAuth {
     return url.toString();
   }
 
-  /** Complete the flow with the params delivered to obsidian://notesky-auth. */
+  /** Complete the flow with the params delivered to obsidian://atproto-sync-auth. */
   async completeCallback(params: Record<string, string>): Promise<OAuthSession> {
     const searchParams = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
