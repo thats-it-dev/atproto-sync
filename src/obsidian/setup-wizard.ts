@@ -60,7 +60,8 @@ export class SetupWizard extends Modal {
       case 'browser':
         return 'Continue in your browser';
       case 'passphrase':
-        return 'Encryption passphrase';
+        if (this.laterDevice === null) return 'Vault passphrase';
+        return this.laterDevice ? 'Enter vault passphrase' : 'Create vault passphrase';
       case 'done':
         return 'You’re all set';
     }
@@ -226,8 +227,8 @@ export class SetupWizard extends Modal {
     }
     contentEl.createEl('p', {
       text: this.laterDevice
-        ? 'This account already has an encrypted vault. Enter the same passphrase you chose on your first device.'
-        : 'Choose a passphrase. Every note is encrypted with it before it leaves this device.',
+        ? 'Your vault data is encrypted whenever it leaves your device. Enter the passphrase you chose when you first set up this vault.'
+        : 'Your vault data is encrypted whenever it leaves your device. Choose the passphrase that will protect it.',
     });
     if (!this.laterDevice) {
       contentEl.createEl('p', { text: PASSPHRASE_WARNING, cls: 'mod-warning' });
