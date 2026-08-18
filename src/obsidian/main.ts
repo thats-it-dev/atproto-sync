@@ -1,4 +1,4 @@
-import { Notice, Plugin } from 'obsidian';
+import { Notice, Plugin, setIcon } from 'obsidian';
 import { Agent } from '@atproto/api';
 import { SyncEngine } from '../sync/engine';
 import { fromB64 } from '../crypto/box';
@@ -80,6 +80,11 @@ export default class NoteskyPlugin extends Plugin {
     this.settings = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
 
     this.statusBar = this.addStatusBarItem();
+    this.statusBar.addClass('mod-clickable', 'notesky-status');
+    this.statusBar.addEventListener('click', () => {
+      if (this.currentStatus === 'setup') new SetupWizard(this.app, this).open();
+      else void this.runSync(true);
+    });
     this.setStatus('idle');
     this.addSettingTab(new NoteskySettingTab(this.app, this));
 
@@ -244,18 +249,21 @@ export default class NoteskyPlugin extends Plugin {
     }
   }
 
+  private currentStatus: 'idle' | 'syncing' | 'error' | 'setup' = 'idle';
+
   private setStatus(state: 'idle' | 'syncing' | 'error' | 'setup'): void {
+    this.currentStatus = state;
     const time = this.lastSyncAt
       ? ` · ${this.lastSyncAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
       : '';
-    const label =
-      state === 'syncing'
-        ? 'syncing…'
-        : state === 'error'
-          ? 'error'
-          : state === 'setup'
-            ? 'setup needed'
-            : `synced${time}`;
-    this.statusBar.setText(`Notesky: ${label}`);
+    const config = {
+      idle: { icon: 'cloud', tip: `Notesky: synced${time} — click to sync now` },
+      syncing: { icon: 'refresh-cw', tip: 'Notesky: syncing…' },
+      error: { icon: 'cloud-off', tip: 'Notesky: sync error — click to retry' },
+      setup: { icon: 'cloud-off', tip: 'Notesky: setup needed — click to begin' },
+    }[state];
+    setIcon(this.statusBar, config.icon);
+    this.statusBar.setAttr('aria-label', config.tip);
+    this.statusBar.setAttr('data-notesky-status', state);
   }
 }

@@ -24,6 +24,31 @@
   }
 }
 
+.notesky-status .svg-icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+
+.notesky-status[data-notesky-status='syncing'] .svg-icon {
+  color: var(--interactive-accent);
+  animation: notesky-spin 1.2s linear infinite;
+}
+
+.notesky-status[data-notesky-status='error'] .svg-icon {
+  color: var(--text-error);
+}
+
+.notesky-status[data-notesky-status='setup'] .svg-icon {
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notesky-status[data-notesky-status='syncing'] .svg-icon {
+    animation: none;
+  }
+}
+
 .notesky-link-button {
   display: block;
   text-align: center;
