@@ -29,6 +29,7 @@ export class SetupWizard extends Modal {
   }
 
   onOpen(): void {
+    this.contentEl.addClass('notesky-wizard');
     const s = this.plugin.settings;
     const hasAuth = s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
     if (s.masterKeyB64 && s.vaultRkey && hasAuth) this.step = 'done';
@@ -61,10 +62,18 @@ export class SetupWizard extends Modal {
     else this.renderDone();
 
     if (this.busyMessage) {
-      createBusyRow(contentEl, this.busyMessage);
       for (const el of contentEl.querySelectorAll('button, input')) {
         (el as HTMLButtonElement | HTMLInputElement).disabled = true;
       }
+    }
+  }
+
+  /** Render action controls — or, while busy, the spinner in their place. */
+  private actionArea(build: () => void): void {
+    if (this.busyMessage) {
+      createBusyRow(this.contentEl, this.busyMessage);
+    } else {
+      build();
     }
   }
 
@@ -99,17 +108,19 @@ export class SetupWizard extends Modal {
       );
 
     if (!this.useAppPassword) {
-      new Setting(contentEl).addButton((b) =>
-        b
-          .setButtonText('Sign in with Bluesky')
-          .setCta()
-          .onClick(() => void this.startOAuth())
-      );
-      const alt = contentEl.createEl('p');
-      const link = alt.createEl('a', { text: 'Use an app password instead' });
-      link.addEventListener('click', () => {
-        this.useAppPassword = true;
-        this.render();
+      this.actionArea(() => {
+        new Setting(contentEl).addButton((b) =>
+          b
+            .setButtonText('Sign in with Bluesky')
+            .setCta()
+            .onClick(() => void this.startOAuth())
+        );
+        const alt = contentEl.createEl('p');
+        const link = alt.createEl('a', { text: 'Use an app password instead' });
+        link.addEventListener('click', () => {
+          this.useAppPassword = true;
+          this.render();
+        });
       });
     } else {
       new Setting(contentEl)
@@ -119,19 +130,21 @@ export class SetupWizard extends Modal {
           t.inputEl.type = 'password';
           t.setValue(this.appPassword).onChange((v) => (this.appPassword = v.trim()));
         });
-      new Setting(contentEl)
-        .addButton((b) =>
-          b
-            .setButtonText('Log in')
-            .setCta()
-            .onClick(() => void this.loginWithAppPassword())
-        )
-        .addButton((b) =>
-          b.setButtonText('Back').onClick(() => {
-            this.useAppPassword = false;
-            this.render();
-          })
-        );
+      this.actionArea(() => {
+        new Setting(contentEl)
+          .addButton((b) =>
+            b
+              .setButtonText('Log in')
+              .setCta()
+              .onClick(() => void this.loginWithAppPassword())
+          )
+          .addButton((b) =>
+            b.setButtonText('Back').onClick(() => {
+              this.useAppPassword = false;
+              this.render();
+            })
+          );
+      });
     }
   }
 
@@ -160,14 +173,16 @@ export class SetupWizard extends Modal {
       text: `Your sign-in for ${this.handle} is ready. Approve it in the browser and Obsidian will pick up right here.`,
     });
 
-    // A real anchor: Obsidian routes it to the system browser on all platforms.
-    createLinkButton(contentEl, this.authUrl!, 'Open login page');
+    this.actionArea(() => {
+      // A real anchor: Obsidian routes it to the system browser on all platforms.
+      createLinkButton(contentEl, this.authUrl!, 'Open login page');
 
-    const back = contentEl.createEl('p');
-    const backLink = back.createEl('a', { text: 'Back' });
-    backLink.addEventListener('click', () => {
-      this.step = 'login';
-      this.render();
+      const back = contentEl.createEl('p');
+      const backLink = back.createEl('a', { text: 'Back' });
+      backLink.addEventListener('click', () => {
+        this.step = 'login';
+        this.render();
+      });
     });
   }
 
@@ -229,12 +244,14 @@ export class SetupWizard extends Modal {
       });
     });
 
-    new Setting(contentEl).addButton((b) =>
-      b
-        .setButtonText(this.laterDevice ? 'Unlock vault' : 'Create vault')
-        .setCta()
-        .onClick(() => void this.submitPassphrase())
-    );
+    this.actionArea(() => {
+      new Setting(contentEl).addButton((b) =>
+        b
+          .setButtonText(this.laterDevice ? 'Unlock vault' : 'Create vault')
+          .setCta()
+          .onClick(() => void this.submitPassphrase())
+      );
+    });
   }
 
   private async submitPassphrase(): Promise<void> {

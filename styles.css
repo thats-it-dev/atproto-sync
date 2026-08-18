@@ -22,3 +22,14 @@
   margin: 0.75em 0;
   color: var(--text-muted);
 }
+
+.notesky-wizard h2 {
+  text-align: center;
+}
+
+/* In the wizard the busy row stands in for the action buttons. */
+.notesky-wizard .notesky-busy-row {
+  justify-content: center;
+  padding: 1em 0 0.5em;
+  margin: 0;
+}
