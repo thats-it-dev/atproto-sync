@@ -33,6 +33,7 @@ export type Op =
   | { kind: 'pull'; path: string; rkey: string; content: string; cid: string }
   | { kind: 'pullCreate'; path: string; rkey: string; content: string; cid: string }
   | { kind: 'merge'; path: string; rkey: string; base: string; local: string; remote: string; swapCid: string }
+  | { kind: 'adopt'; path: string; rkey: string; content: string; cid: string }
   | { kind: 'deleteRemote'; rkey: string; path: string; swapCid: string }
   | { kind: 'deleteLocal'; path: string; rkey: string };
 
@@ -167,6 +168,15 @@ export function reconcile(
         // any unindexed remote that now lives there.
         vacatedPaths.add(entry.path);
       }
+    } else if (localFile.content === rec.content) {
+      // Both changed to the same content: nothing to merge, just re-bind.
+      ops.push({
+        kind: 'adopt',
+        path: localFile.path,
+        rkey: entry.rkey,
+        content: rec.content,
+        cid: rec.cid,
+      });
     } else {
       // Both changed: three-way merge, CASing against the remote we merged with.
       ops.push({
@@ -186,16 +196,21 @@ export function reconcile(
     if (indexByPath.has(f.path) || renamedPaths.has(f.path)) continue;
     const rec = remoteByPath.get(f.path);
     if (rec && !indexByRkey.has(rec.rkey)) {
-      // Simultaneous create on both sides at the same path: merge with empty base.
-      ops.push({
-        kind: 'merge',
-        path: f.path,
-        rkey: rec.rkey,
-        base: '',
-        local: f.content,
-        remote: rec.content,
-        swapCid: rec.cid,
-      });
+      if (f.content === rec.content) {
+        // Same content on both sides (e.g. after a full re-scan): re-bind only.
+        ops.push({ kind: 'adopt', path: f.path, rkey: rec.rkey, content: rec.content, cid: rec.cid });
+      } else {
+        // Simultaneous create on both sides at the same path: merge with empty base.
+        ops.push({
+          kind: 'merge',
+          path: f.path,
+          rkey: rec.rkey,
+          base: '',
+          local: f.content,
+          remote: rec.content,
+          swapCid: rec.cid,
+        });
+      }
     } else if (!rec) {
       ops.push({ kind: 'pushCreate', path: f.path, content: f.content });
     }

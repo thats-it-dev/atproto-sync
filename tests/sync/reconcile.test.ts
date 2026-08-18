@@ -167,6 +167,30 @@ describe('reconcile: remote rename + replacement in one cycle', () => {
   });
 });
 
+describe('reconcile: identical content needs no merge (re-scan case)', () => {
+  it('adopts a same-path create when local and remote content are identical', () => {
+    const ops = reconcile(
+      [file('img.png', 'HASH1:enc')],
+      [note('r1', 'cid-1', 'img.png', 'HASH1:enc')],
+      [] // empty index: exactly the state after a full re-scan
+    );
+    expect(ops).toEqual([
+      { kind: 'adopt', path: 'img.png', rkey: 'r1', content: 'HASH1:enc', cid: 'cid-1' },
+    ]);
+  });
+
+  it('adopts when both sides changed to the same content', () => {
+    const ops = reconcile(
+      [file('a.md', 'same edit')],
+      [note('r1', 'cid-2', 'a.md', 'same edit')],
+      [entry('a.md', 'r1', 'old base', 'cid-1')]
+    );
+    expect(ops).toEqual([
+      { kind: 'adopt', path: 'a.md', rkey: 'r1', content: 'same edit', cid: 'cid-2' },
+    ]);
+  });
+});
+
 describe('reconcile: creates', () => {
   it('pushCreates a local file with no index entry and no remote at that path', () => {
     const ops = reconcile([file('new.md', 'brand new')], [], []);

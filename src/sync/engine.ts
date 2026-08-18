@@ -549,6 +549,16 @@ export class SyncEngine {
               indexByRkey.delete(op.rkey);
               break;
             }
+            case 'adopt': {
+              // Local and remote already agree: re-bind the index, no I/O.
+              setEntry({
+                path: op.path,
+                rkey: op.rkey,
+                baseContent: op.content,
+                lastCid: op.cid,
+              });
+              break;
+            }
           }
         } catch (err) {
           if (err instanceof CasError) {

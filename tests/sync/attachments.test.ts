@@ -132,6 +132,26 @@ describe('attachment sync', () => {
     expect(value.meta.path).toBe('shared.png'); // still public via two.md
   });
 
+  it('full re-scan with identical files causes no conflicts, downloads, or pushes', async () => {
+    const pds = new FakePds();
+    const warnings: string[] = [];
+    const a = makeEngine(pds, MASTER, { onWarning: (m) => warnings.push(m) });
+    await a.vault.writeBinary('img/photo.png', IMG);
+    await a.vault.write('note.md', 'some text\n');
+    await a.engine.sync();
+    const before = await pds.listRecords(ATTACHMENT_COLLECTION);
+
+    await a.index.save([]); // "Full re-scan": forget all local sync state
+    await a.engine.sync();
+
+    expect(warnings).toEqual([]);
+    const stash = [...a.vault.binaries.keys()].filter((p) => p.startsWith('Notesky Conflicts/'));
+    expect(stash).toEqual([]);
+    const after = await pds.listRecords(ATTACHMENT_COLLECTION);
+    expect(after).toEqual(before); // same record, same cid: nothing re-pushed
+    expect(a.index.entries.length).toBe(2); // note + attachment re-bound
+  });
+
   it('oversized files are skipped with a warning and nothing synced', async () => {
     const pds = new FakePds({ blobLimit: 64 });
     const warnings: string[] = [];
