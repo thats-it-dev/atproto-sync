@@ -79,6 +79,7 @@ export async function createVault(
   await pds.putRecord(VAULT_COLLECTION, rkey, record, null);
   s.vaultRkey = rkey;
   s.masterKeyB64 = await toB64(master);
+  s.setupIncomplete = false;
   await plugin.saveSettings();
 }
 
@@ -107,6 +108,7 @@ export async function unlockVault(
   if (!ok) throw new WrongPassphraseError();
   s.vaultRkey = rkey;
   s.masterKeyB64 = await toB64(master);
+  s.setupIncomplete = false;
   await plugin.saveSettings();
 }
 

@@ -26,6 +26,8 @@ export interface AtprotoSyncSettings {
   masterKeyB64: string;
   syncIntervalMinutes: number;
   ignorePatterns: string[];
+  /** True after an abandoned setup was rolled back; drives the alert status icon. */
+  setupIncomplete: boolean;
 }
 
 export const DEFAULT_SETTINGS: AtprotoSyncSettings = {
@@ -38,6 +40,7 @@ export const DEFAULT_SETTINGS: AtprotoSyncSettings = {
   masterKeyB64: '',
   syncIntervalMinutes: 5,
   ignorePatterns: [],
+  setupIncomplete: false,
 };
 
 const DEBOUNCE_MS = 2000;
@@ -62,6 +65,29 @@ export default class AtprotoSyncPlugin extends Plugin {
 
   private notifyAuth(phase: AuthPhase): void {
     this.authListeners.forEach((listener) => listener(phase));
+  }
+
+  /** The open setup wizard, if any — so auth callbacks don't open a second one. */
+  activeWizard: SetupWizard | null = null;
+
+  /**
+   * Roll back a half-finished setup: auth without a passphrase must not
+   * persist, or the user believes syncing works when nothing ever leaves
+   * the device.
+   */
+  async wipeAuth(): Promise<void> {
+    const s = this.settings;
+    if (s.authMode === 'oauth' && s.authDid) {
+      await this.oauth.logout(s.authDid).catch(() => {});
+    }
+    s.appPassword = '';
+    s.authDid = '';
+    s.authMode = 'app-password';
+    s.setupIncomplete = true;
+    this.pdsClient = null;
+    this.engine = null;
+    await this.saveSettings();
+    this.setStatus('setup');
   }
   private engine: SyncEngine | null = null;
 
@@ -113,7 +139,13 @@ export default class AtprotoSyncPlugin extends Plugin {
           await this.saveSettings();
           new Notice(`ATProto Sync: signed in as ${session.did}`);
           this.notifyAuth('complete');
-          await this.initEngine();
+          if (!this.settings.masterKeyB64 || !this.settings.vaultRkey) {
+            // Setup isn't done until the passphrase exists: put the wizard
+            // (at its passphrase step) in front of the user.
+            if (!this.activeWizard) new SetupWizard(this.app, this).open();
+          } else {
+            await this.initEngine();
+          }
         } catch (err) {
           this.notifyAuth('failed');
           new Notice(`ATProto Sync: sign-in failed — ${err instanceof Error ? err.message : err}`);
@@ -123,10 +155,20 @@ export default class AtprotoSyncPlugin extends Plugin {
 
     this.app.workspace.onLayoutReady(() =>
       void (async () => {
+        const s = this.settings;
+        const hasAuth =
+          s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
+        if (hasAuth && (!s.masterKeyB64 || !s.vaultRkey)) {
+          // A half-finished setup survived a restart: roll it back.
+          await this.wipeAuth();
+          new Notice(
+            'ATProto Sync: setup was never finished, so you were signed out. Nothing has synced.'
+          );
+          return;
+        }
         await this.initEngine();
         // Fresh install (no auth, no key): open the guided setup once.
-        const s = this.settings;
-        if (!s.masterKeyB64 && !s.authDid && !s.appPassword) {
+        if (!s.masterKeyB64 && !s.authDid && !s.appPassword && !s.setupIncomplete) {
           new SetupWizard(this.app, this).open();
         }
       })()
@@ -257,14 +299,17 @@ export default class AtprotoSyncPlugin extends Plugin {
     const time = this.lastSyncAt
       ? ` · ${this.lastSyncAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
       : '';
+    const incomplete = state === 'setup' && this.settings.setupIncomplete;
     const config = {
       idle: { icon: 'cloud-check', fallback: 'cloud', tip: `ATProto Sync: synced${time} — click to sync now` },
       syncing: { icon: 'cloud-sync', fallback: 'refresh-cw', tip: 'ATProto Sync: syncing…' },
       error: { icon: 'cloud-alert', fallback: 'cloud-off', tip: 'ATProto Sync: sync error — click to retry' },
-      setup: { icon: 'cloud-off', fallback: 'cloud-off', tip: 'ATProto Sync: setup needed — click to begin' },
+      setup: incomplete
+        ? { icon: 'cloud-alert', fallback: 'cloud-off', tip: 'ATProto Sync: setup incomplete — click to finish' }
+        : { icon: 'cloud-off', fallback: 'cloud-off', tip: 'ATProto Sync: setup needed — click to begin' },
     }[state];
     setIconWithFallback(this.statusBar, config.icon, config.fallback);
     this.statusBar.setAttr('aria-label', config.tip);
-    this.statusBar.setAttr('data-sync-status', state);
+    this.statusBar.setAttr('data-sync-status', incomplete ? 'attention' : state);
   }
 }

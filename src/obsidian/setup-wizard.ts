@@ -36,6 +36,7 @@ export class SetupWizard extends Modal {
   }
 
   onOpen(): void {
+    this.plugin.activeWizard = this;
     this.contentEl.addClass('atproto-sync-wizard');
     const s = this.plugin.settings;
     const hasAuth = s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
@@ -56,8 +57,21 @@ export class SetupWizard extends Modal {
   }
 
   onClose(): void {
+    if (this.plugin.activeWizard === this) this.plugin.activeWizard = null;
     this.offAuthChanged?.();
     this.contentEl.empty();
+    // Abandoned after signing in but before the passphrase: roll the auth
+    // back so a half-setup never masquerades as a working sync.
+    const s = this.plugin.settings;
+    const hasAuth =
+      s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
+    if (hasAuth && (!s.masterKeyB64 || !s.vaultRkey)) {
+      void this.plugin.wipeAuth().then(() => {
+        new Notice(
+          'ATProto Sync: setup incomplete — you were signed out. Click the status bar icon to finish.'
+        );
+      });
+    }
   }
 
   private stepTitle(): string {
