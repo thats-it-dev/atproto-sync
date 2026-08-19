@@ -60,7 +60,7 @@ export interface SyncEngineOptions {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 let rkeyCounter = 0;
@@ -141,15 +141,14 @@ export class SyncEngine {
 
   private notesStrategy(): CollectionStrategy {
     const { vault, masterKey } = this.opts;
-    const engine = this;
     return {
       collection: NOTE_COLLECTION,
 
-      async listLocal() {
+      listLocal: async () => {
         return (await vault.readAll()).filter((f) => !f.path.startsWith(`${CONFLICTS_FOLDER}/`));
       },
 
-      async decryptRemote(rec) {
+      decryptRemote: async (rec) => {
         const value = rec.value as NoteRecord;
         const payload =
           'ciphertext' in value.content
@@ -158,21 +157,21 @@ export class SyncEngine {
         return { path: payload.path, content: payload.body };
       },
 
-      async makeRecord(path, content) {
-        return engine.encryptToRecord(path, content);
+      makeRecord: async (path, content) => {
+        return this.encryptToRecord(path, content);
       },
 
-      async applyPull(path, content) {
+      applyPull: async (path, content) => {
         await vault.write(path, content);
       },
 
-      async resolveMerge(op) {
+      resolveMerge: async (op) => {
         const r = merge3(op.base, op.local, op.remote);
         if (!r.clean) {
           // Some local edits could not be applied: stash the full local
           // version on this device so nothing is lost, and say so.
-          await vault.write(engine.stashPath(op.path), op.local);
-          engine.opts.onWarning?.(
+          await vault.write(this.stashPath(op.path), op.local);
+          this.opts.onWarning?.(
             `Conflicting edits in "${op.path}" could not be fully merged. ` +
               `Your version is saved in "${CONFLICTS_FOLDER}".`
           );
@@ -184,7 +183,7 @@ export class SyncEngine {
         await vault.remove(path);
       },
 
-      unreadableWarning(count) {
+      unreadableWarning: (count) => {
         return (
           `${count} note record(s) could not be decrypted and were skipped. ` +
           'Check that every device uses the same passphrase.'
@@ -195,7 +194,6 @@ export class SyncEngine {
 
   private attachmentsStrategy(): CollectionStrategy {
     const { pds, vault, masterKey } = this.opts;
-    const engine = this;
     // Listed records this cycle, for pull-time blob resolution.
     const recordByRkey = new Map<string, AttachmentRecord>();
     // Public state is derived: an attachment is public iff some public local
@@ -205,16 +203,16 @@ export class SyncEngine {
     return {
       collection: ATTACHMENT_COLLECTION,
 
-      async listLocal() {
+      listLocal: async () => {
         const limit = await pds.getBlobLimit();
         const all = (await vault.readAllAttachments()).filter(
           (f) => !f.path.startsWith(`${CONFLICTS_FOLDER}/`)
         );
         // Encrypted blob = plaintext + 16-byte MAC.
         const skipped = all.filter((f) => f.size + 16 > limit).map((f) => f.path).sort();
-        engine.lastSkippedPaths = skipped;
+        this.lastSkippedPaths = skipped;
         if (skipped.length > 0) {
-          engine.opts.onWarning?.(
+          this.opts.onWarning?.(
             `${skipped.length} file(s) too large for your PDS to store, not synced: ` +
               skipped.join(', ')
           );
@@ -231,7 +229,7 @@ export class SyncEngine {
         }));
       },
 
-      async decryptRemote(rec) {
+      decryptRemote: async (rec) => {
         const value = rec.value as AttachmentRecord;
         recordByRkey.set(rec.rkey, value);
         if ('ciphertext' in value.meta) {
@@ -241,31 +239,31 @@ export class SyncEngine {
         return { path: value.meta.path, content: `${value.contentHash}:pub` };
       },
 
-      async makeRecord(path, content) {
+      makeRecord: async (path, content) => {
         const bytes = await vault.readBinary(path);
         const mimeType = mimeFromPath(path);
         if (isPublic(content)) {
           const uploaded = await pds.uploadBlob(bytes, mimeType);
           return buildPlaintextAttachment({
-            vault: engine.opts.vaultRkey,
+            vault: this.opts.vaultRkey,
             path,
             mimeType,
             blob: uploaded.blob,
             contentHash: await sha256Hex(bytes),
-            updatedAt: engine.nowIso(),
+            updatedAt: this.nowIso(),
           });
         }
         const enc = await encryptAttachment(bytes, { path, mimeType }, masterKey);
         const uploaded = await pds.uploadBlob(enc.blob, 'application/octet-stream');
         return buildEncryptedAttachment({
-          vault: engine.opts.vaultRkey,
+          vault: this.opts.vaultRkey,
           meta: enc.meta,
           blob: uploaded.blob,
-          updatedAt: engine.nowIso(),
+          updatedAt: this.nowIso(),
         });
       },
 
-      async applyPull(path, _content, rkey) {
+      applyPull: async (path, _content, rkey) => {
         const value = recordByRkey.get(rkey);
         if (!value) throw new Error(`no listed attachment record for ${rkey}`);
         const blobBytes = await pds.getBlob(blobRefString(value.blob));
@@ -276,11 +274,11 @@ export class SyncEngine {
         await vault.writeBinary(path, bytes);
       },
 
-      async resolveMerge(op) {
+      resolveMerge: async (op) => {
         // Binaries cannot merge: remote stands, local bytes are stashed.
         const bytes = await vault.readBinary(op.path);
-        await vault.writeBinary(engine.stashPath(op.path), bytes);
-        engine.opts.onWarning?.(
+        await vault.writeBinary(this.stashPath(op.path), bytes);
+        this.opts.onWarning?.(
           `"${op.path}" was changed on two devices. The other device's version won; ` +
             `yours is saved in "${CONFLICTS_FOLDER}".`
         );
@@ -291,7 +289,7 @@ export class SyncEngine {
         await vault.remove(path);
       },
 
-      unreadableWarning(count) {
+      unreadableWarning: (count) => {
         return (
           `${count} attachment record(s) could not be decrypted and were skipped. ` +
           'Check that every device uses the same passphrase.'

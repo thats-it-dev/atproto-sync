@@ -4,7 +4,8 @@ import type { VaultRecord } from '../lexicon/types';
 import { fromB64, toB64 } from '../crypto/box';
 import { makeCheckValue, verifyCheckValue } from '../crypto/check';
 import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '../crypto/keys';
-import { RealPdsClient, login } from './pds-client';
+import { RealPdsClient } from './pds-client';
+import { login } from './login';
 import type AtprotoSyncPlugin from './main';
 
 /** Build (or reuse) a PDS client from whichever auth the user completed. */

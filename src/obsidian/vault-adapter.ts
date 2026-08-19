@@ -39,7 +39,7 @@ export class ObsidianVaultAdapter implements VaultAdapter {
   async remove(path: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(normalizePath(path.normalize('NFC')));
     if (file) {
-      await this.app.vault.trash(file, true); // system trash: recoverable
+      await this.app.fileManager.trashFile(file); // respects the user's deletion preference
     }
   }
 

@@ -14,10 +14,10 @@ const DEFAULT_BLOB_LIMIT = 5 * 1024 * 1024; // reference PDS default
 /** Translate PDS transport errors into messages a user can act on. */
 function mapPdsError(err: unknown): unknown {
   if (err instanceof XRPCError) {
-    if (err.status === 429 || err.error === 'RateLimitExceeded') {
+    if (Number(err.status) === 429 || err.error === 'RateLimitExceeded') {
       return new Error('Your PDS is rate-limiting requests; sync will retry on the next interval.');
     }
-    if ((err.status as number) === 507 || /quota|too large|storage/i.test(err.error ?? '')) {
+    if (Number(err.status) === 507 || /quota|too large|storage/i.test(err.error ?? '')) {
       return new Error('Your PDS reports it is out of storage; free space or contact your host.');
     }
   }
@@ -139,7 +139,7 @@ export class RealPdsClient implements PdsClient {
     } catch (err) {
       if (
         err instanceof XRPCError &&
-        ((err.status as number) === 413 || /too large|blob.*size|payload/i.test(err.message))
+        (Number(err.status) === 413 || /too large|blob.*size|payload/i.test(err.message))
       ) {
         throw new BlobTooLargeError(err.message);
       }
@@ -224,34 +224,6 @@ export class RealPdsClient implements PdsClient {
   }
 }
 
-/** Resolve a handle to its PDS service URL via the public AppView + DID directory. */
-export async function resolvePdsUrl(handle: string): Promise<{ did: string; pdsUrl: string }> {
-  const res = await fetch(
-    `https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`
-  );
-  if (!res.ok) throw new Error(`Could not resolve handle ${handle}: ${res.status}`);
-  const { did } = (await res.json()) as { did: string };
-
-  let didDocUrl: string;
-  if (did.startsWith('did:plc:')) {
-    didDocUrl = `https://plc.directory/${did}`;
-  } else if (did.startsWith('did:web:')) {
-    didDocUrl = `https://${decodeURIComponent(did.slice('did:web:'.length))}/.well-known/did.json`;
-  } else {
-    throw new Error(`Unsupported DID method: ${did}`);
-  }
-  const docRes = await fetch(didDocUrl);
-  if (!docRes.ok) throw new Error(`Could not fetch DID document for ${did}: ${docRes.status}`);
-  const doc = (await docRes.json()) as {
-    service?: Array<{ id: string; type: string; serviceEndpoint: string }>;
-  };
-  const pds = doc.service?.find(
-    (s) => s.id === '#atproto_pds' || s.id.endsWith('#atproto_pds')
-  );
-  if (!pds) throw new Error(`No PDS endpoint in DID document for ${did}`);
-  return { did, pdsUrl: pds.serviceEndpoint };
-}
-
 export interface LoginOptions {
   identifier: string;
   password: string;
@@ -259,9 +231,18 @@ export interface LoginOptions {
   pdsUrl?: string;
 }
 
-/** App-password login: resolve the handle's PDS, authenticate, return a ready client. */
-export async function login(options: LoginOptions): Promise<RealPdsClient> {
-  const service = options.pdsUrl ?? (await resolvePdsUrl(options.identifier)).pdsUrl;
+/**
+ * App-password login. When no pdsUrl is given, a resolver (handle -> PDS
+ * endpoint) must be supplied; the Obsidian layer provides one in login.ts.
+ */
+export async function login(
+  options: LoginOptions,
+  resolvePds?: (handle: string) => Promise<{ did: string; pdsUrl: string }>
+): Promise<RealPdsClient> {
+  if (!options.pdsUrl && !resolvePds) {
+    throw new Error('login requires either pdsUrl or a resolver');
+  }
+  const service = options.pdsUrl ?? (await resolvePds!(options.identifier)).pdsUrl;
   const agent = new AtpAgent({ service });
   const res = await agent.login({
     identifier: options.identifier,

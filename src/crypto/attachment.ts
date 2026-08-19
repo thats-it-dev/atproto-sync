@@ -62,7 +62,7 @@ export async function decryptAttachmentMeta(
     { nonce: await fromB64(meta.metaNonce), ciphertext: await fromB64(meta.ciphertext) },
     key
   );
-  return JSON.parse(new TextDecoder().decode(plain));
+  return JSON.parse(new TextDecoder().decode(plain)) as AttachmentMetaPayload;
 }
 
 export async function decryptAttachmentBlob(

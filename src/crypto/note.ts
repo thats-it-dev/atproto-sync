@@ -38,5 +38,5 @@ export async function decryptNote(
     { nonce: await fromB64(enc.contentNonce), ciphertext: await fromB64(enc.ciphertext) },
     noteKey
   );
-  return JSON.parse(new TextDecoder().decode(plain));
+  return JSON.parse(new TextDecoder().decode(plain)) as NotePayload;
 }

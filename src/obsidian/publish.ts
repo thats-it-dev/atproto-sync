@@ -169,7 +169,7 @@ class ReviewPublicModal extends Modal {
         .setName(note.title)
         .setDesc(`${note.path} · /${note.slug}`)
         .addButton((b) =>
-          b.setButtonText('Make private').setWarning().onClick(async () => {
+          b.setButtonText('Make private').setDestructive().onClick(async () => {
             const file = this.plugin.app.vault.getAbstractFileByPath(note.path);
             if (file instanceof TFile) {
               await makePrivate(this.plugin, file);

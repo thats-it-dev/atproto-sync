@@ -15,9 +15,10 @@ End-to-end encrypted by default.
   character-level merging (the same algorithm Obsidian Sync uses). True
   conflicts never lose data: the losing version is kept locally in
   `Sync Conflicts/`.
-- **coming soon - Publish per note.** Toggle a note public and it becomes a plaintext record
+- **Publish per note.** Toggle a note public and it becomes a plaintext record
   (with its embedded images) that anyone — or any app — can read from your
-  PDS. Toggle it back and it re-encrypts with a fresh key.
+  PDS. Toggle it back and it re-encrypts with a fresh key. A public web viewer
+  for these records is planned at [notesky.app](https://notesky.app).
 
 ## Setup
 
@@ -29,6 +30,18 @@ End-to-end encrypted by default.
 
 > **Passphrase warning:** if you lose the passphrase, encrypted notes on the
 > server cannot be recovered by anyone — including us.
+
+## Permissions and privacy
+
+- **File listing**: as a sync plugin, it enumerates vault file paths to know
+  what to sync (respecting your ignore patterns; `.obsidian/` never syncs).
+- **Clipboard**: written only when you tap "Copy link instead" during mobile
+  sign-in; never read.
+- **Browser storage**: sync state and settings live in IndexedDB; the OAuth
+  library additionally persists its session material in browser storage.
+- **Network**: your PDS, plus public directory endpoints
+  (`public.api.bsky.app`, `plc.directory`) to resolve your handle. No
+  analytics, no third-party servers.
 
 ## Notes on limits
 

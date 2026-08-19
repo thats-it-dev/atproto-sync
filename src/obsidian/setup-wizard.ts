@@ -1,5 +1,5 @@
 import { App, Modal, Notice, Setting } from 'obsidian';
-import { login } from './pds-client';
+import { login } from './login';
 import {
   VaultInfo,
   WrongPassphraseError,

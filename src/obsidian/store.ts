@@ -22,7 +22,7 @@ function isIndexEntry(value: unknown): value is IndexEntry {
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
   });
 }
 

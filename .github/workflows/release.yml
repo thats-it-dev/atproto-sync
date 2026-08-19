@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -38,6 +40,14 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match manifest version $MANIFEST_VERSION"
             exit 1
           fi
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       - name: Create draft release with plugin assets
         env:
