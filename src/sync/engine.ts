@@ -18,7 +18,7 @@ import {
 import { mimeFromPath, resolvePublicAttachments } from '../publish/cascade';
 import { decryptNote, encryptNote } from '../crypto/note';
 import { CasError, PdsClient } from './pds';
-import { IndexEntry, LocalFile, Op, RemoteNote, reconcile } from './reconcile';
+import { IndexEntry, LocalFile, Op, RemoteNote, RenameHint, applyRenames, reconcile } from './reconcile';
 import { merge3 } from './merge';
 
 export interface VaultAdapter {
@@ -29,6 +29,13 @@ export interface VaultAdapter {
   readAllAttachments(): Promise<Array<{ path: string; hash: string; size: number }>>;
   readBinary(path: string): Promise<Uint8Array>;
   writeBinary(path: string, bytes: Uint8Array): Promise<void>;
+  /**
+   * Local renames (files or folders) observed since the last call, oldest
+   * first; the engine rewrites its index with them before reconciling so a
+   * move keeps its record instead of becoming delete + create. Optional:
+   * without it, moves are inferred from identical content where possible.
+   */
+  takeRenames?(): Promise<RenameHint[]>;
 }
 
 export interface IndexStore {
@@ -276,7 +283,7 @@ export class SyncEngine {
 
       resolveMerge: async (op) => {
         // Binaries cannot merge: remote stands, local bytes are stashed.
-        const bytes = await vault.readBinary(op.path);
+        const bytes = await vault.readBinary(op.localPath);
         await vault.writeBinary(this.stashPath(op.path), bytes);
         this.opts.onWarning?.(
           `"${op.path}" was changed on two devices. The other device's version won; ` +
@@ -307,6 +314,12 @@ export class SyncEngine {
       entries.filter((e) => (e.collection ?? NOTE_COLLECTION) === collection);
 
     let entries = await this.opts.index.load();
+    const renames = (await this.opts.vault.takeRenames?.()) ?? [];
+    if (renames.length > 0) {
+      // Persist before any network work so the moves survive a failed cycle.
+      entries = applyRenames(entries, renames);
+      await this.opts.index.save(entries);
+    }
     const notesDirty = await this.syncCollection(
       this.notesStrategy(),
       forCollection(entries, NOTE_COLLECTION),
@@ -526,6 +539,9 @@ export class SyncEngine {
                   baseContent: op.remote,
                   lastCid: op.swapCid,
                 });
+              }
+              if (op.localPath !== op.path) {
+                await strategy.removeLocal(op.localPath); // renamed remotely
               }
               break;
             }

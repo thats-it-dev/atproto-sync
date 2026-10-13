@@ -25,6 +25,45 @@ export interface IndexEntry {
   lastCid: string;
   /** Owning collection; absent on legacy entries (implies app.notesky.note). */
   collection?: string;
+  /**
+   * Path the remote record had at last sync, when it differs from `path`: a
+   * local rename rewrote `path` (see applyRenames) and the record has not
+   * been pushed to the new path yet. Absent when both sides agree.
+   */
+  remotePath?: string;
+}
+
+/** A local move observed by the vault adapter: file or folder, old path -> new path. */
+export interface RenameHint {
+  from: string;
+  to: string;
+}
+
+/**
+ * Rewrite index entries for local renames before reconciling, so a moved
+ * file (or folder) is a path change on its existing rkey rather than a
+ * delete at the old path plus a create at the new one. Hints apply in order,
+ * so chained renames (a->b, then c->a) resolve correctly. Each hint matches
+ * the exact path and everything beneath it as a folder.
+ */
+export function applyRenames(index: IndexEntry[], renames: RenameHint[]): IndexEntry[] {
+  if (renames.length === 0) return index;
+  let out = index.map((e) => ({ ...e }));
+  for (const { from, to } of renames) {
+    if (from === to) continue;
+    const prefix = `${from}/`;
+    out = out.map((e) => {
+      let next: string;
+      if (e.path === from) next = to;
+      else if (e.path.startsWith(prefix)) next = to + e.path.slice(from.length);
+      else return e;
+      const remotePath = e.remotePath ?? e.path;
+      const moved: IndexEntry = { ...e, path: next, remotePath };
+      if (next === remotePath) delete moved.remotePath;
+      return moved;
+    });
+  }
+  return out;
 }
 
 export type Op =
@@ -32,7 +71,18 @@ export type Op =
   | { kind: 'pushCreate'; path: string; content: string }
   | { kind: 'pull'; path: string; rkey: string; content: string; cid: string }
   | { kind: 'pullCreate'; path: string; rkey: string; content: string; cid: string }
-  | { kind: 'merge'; path: string; rkey: string; base: string; local: string; remote: string; swapCid: string }
+  | {
+      kind: 'merge';
+      /** Where the merged result lives (and the path pushed). */
+      path: string;
+      /** Where the local side currently sits; differs from `path` after a remote rename. */
+      localPath: string;
+      rkey: string;
+      base: string;
+      local: string;
+      remote: string;
+      swapCid: string;
+    }
   | { kind: 'adopt'; path: string; rkey: string; content: string; cid: string }
   | { kind: 'deleteRemote'; rkey: string; path: string; swapCid: string }
   | { kind: 'deleteLocal'; path: string; rkey: string };
@@ -132,11 +182,14 @@ export function reconcile(
       continue;
     }
 
-    const localChanged = localFile.content !== entry.baseContent;
+    const localContentChanged = localFile.content !== entry.baseContent;
+    // A rename hint rewrote entry.path; the record still sits at remotePath.
+    const localMoved = entry.remotePath !== undefined && entry.remotePath !== entry.path;
+    const remoteMoved = rec.path !== (entry.remotePath ?? entry.path);
 
     if (rec.deleted) {
       // Remote tombstoned.
-      if (localChanged) {
+      if (localContentChanged) {
         // Edit wins over remote delete: resurrect with the local edit.
         ops.push({ kind: 'push', path: localFile.path, rkey: entry.rkey, content: localFile.content, swapCid: rec.cid });
       } else {
@@ -146,8 +199,9 @@ export function reconcile(
       continue;
     }
 
-    if (!localChanged && !remoteChanged) continue;
-    if (localChanged && !remoteChanged) {
+    if (!localContentChanged && !localMoved && !remoteChanged) continue;
+    if (!remoteChanged) {
+      // Local edit and/or local move onto an untouched remote: push both.
       ops.push({
         kind: 'push',
         path: localFile.path,
@@ -155,7 +209,9 @@ export function reconcile(
         content: localFile.content,
         swapCid: rec.cid,
       });
-    } else if (!localChanged && remoteChanged) {
+      continue;
+    }
+    if (!localContentChanged && !localMoved) {
       ops.push({
         kind: 'pull',
         path: rec.path,
@@ -163,32 +219,57 @@ export function reconcile(
         content: rec.content,
         cid: rec.cid,
       });
-      if (rec.path !== entry.path) {
+      if (remoteMoved) {
         // Remote rename: pulling moves the file, vacating its old path for
         // any unindexed remote that now lives there.
         vacatedPaths.add(entry.path);
       }
-    } else if (localFile.content === rec.content) {
-      // Both changed to the same content: nothing to merge, just re-bind.
+      continue;
+    }
+    if (!localContentChanged && localMoved) {
+      // Local move against a remote edit (and/or remote move): the local path
+      // wins, the remote content wins. Pull the content into the moved file,
+      // then push the new path onto the record.
+      if (rec.content !== entry.baseContent) {
+        ops.push({ kind: 'pull', path: localFile.path, rkey: entry.rkey, content: rec.content, cid: rec.cid });
+      }
       ops.push({
-        kind: 'adopt',
+        kind: 'push',
         path: localFile.path,
         rkey: entry.rkey,
         content: rec.content,
-        cid: rec.cid,
-      });
-    } else {
-      // Both changed: three-way merge, CASing against the remote we merged with.
-      ops.push({
-        kind: 'merge',
-        path: localFile.path,
-        rkey: entry.rkey,
-        base: entry.baseContent,
-        local: localFile.content,
-        remote: rec.content,
         swapCid: rec.cid,
       });
+      continue;
     }
+
+    // Both sides changed content. A local move keeps its path; otherwise the
+    // remote's current path (possibly moved) is where the result goes.
+    const targetPath = localMoved ? localFile.path : rec.path;
+    if (localFile.content === rec.content) {
+      // Same content on both sides: only the binding and/or path differ.
+      if (targetPath === localFile.path && !remoteMoved) {
+        ops.push({ kind: 'adopt', path: localFile.path, rkey: entry.rkey, content: rec.content, cid: rec.cid });
+      } else if (localMoved) {
+        ops.push({ kind: 'push', path: localFile.path, rkey: entry.rkey, content: localFile.content, swapCid: rec.cid });
+      } else {
+        ops.push({ kind: 'pull', path: rec.path, rkey: entry.rkey, content: rec.content, cid: rec.cid });
+        vacatedPaths.add(entry.path);
+      }
+      continue;
+    }
+    // Three-way merge, CASing against the remote we merged with.
+    ops.push({
+      kind: 'merge',
+      path: targetPath,
+      localPath: localFile.path,
+      rkey: entry.rkey,
+      base: entry.baseContent,
+      local: localFile.content,
+      remote: rec.content,
+      swapCid: rec.cid,
+    });
+    if (targetPath !== localFile.path) vacatedPaths.add(localFile.path);
   }
 
   // Unindexed local files: new on this device.
@@ -204,6 +285,7 @@ export function reconcile(
         ops.push({
           kind: 'merge',
           path: f.path,
+          localPath: f.path,
           rkey: rec.rkey,
           base: '',
           local: f.content,

@@ -1,6 +1,6 @@
 import { SyncEngine, VaultAdapter, IndexStore, SyncEngineOptions } from '../../src/sync/engine';
 import { sha256Hex } from '../../src/lexicon/build';
-import type { IndexEntry } from '../../src/sync/reconcile';
+import type { IndexEntry, RenameHint } from '../../src/sync/reconcile';
 import type { PdsClient } from '../../src/sync/pds';
 
 /** In-memory VaultAdapter for tests, with a read helper. */
@@ -41,6 +41,32 @@ export class FakeVault implements VaultAdapter {
 
   async writeBinary(path: string, bytes: Uint8Array): Promise<void> {
     this.binaries.set(path, bytes.slice());
+  }
+
+  private pendingRenames: RenameHint[] = [];
+
+  /** Move a file or folder and record the hint, as the real adapters do on a rename event. */
+  async rename(from: string, to: string): Promise<void> {
+    const move = <T>(map: Map<string, T>) => {
+      for (const [p, v] of [...map]) {
+        if (p === from) {
+          map.delete(p);
+          map.set(to, v);
+        } else if (p.startsWith(`${from}/`)) {
+          map.delete(p);
+          map.set(to + p.slice(from.length), v);
+        }
+      }
+    };
+    move(this.files);
+    move(this.binaries);
+    this.pendingRenames.push({ from, to });
+  }
+
+  async takeRenames(): Promise<RenameHint[]> {
+    const out = this.pendingRenames;
+    this.pendingRenames = [];
+    return out;
   }
 }
 

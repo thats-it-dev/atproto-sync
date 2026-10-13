@@ -91,6 +91,7 @@ export default class AtprotoSyncPlugin extends Plugin {
     this.setStatus('setup');
   }
   private engine: SyncEngine | null = null;
+  private vaultAdapter: ObsidianVaultAdapter | null = null;
 
   /** Files the last sync skipped as too large for the PDS (shown in settings). */
   get skippedPaths(): string[] {
@@ -181,7 +182,14 @@ export default class AtprotoSyncPlugin extends Plugin {
     this.registerEvent(this.app.vault.on('modify', () => this.scheduleSync()));
     this.registerEvent(this.app.vault.on('create', () => this.scheduleSync()));
     this.registerEvent(this.app.vault.on('delete', () => this.scheduleSync()));
-    this.registerEvent(this.app.vault.on('rename', () => this.scheduleSync()));
+    this.registerEvent(
+      this.app.vault.on('rename', (file, oldPath) => {
+        // Hand the move to the engine so the record keeps its rkey instead of
+        // being deleted at the old path and recreated at the new one.
+        this.vaultAdapter?.noteRename(oldPath, file.path);
+        this.scheduleSync();
+      })
+    );
     this.applySyncInterval();
   }
 
@@ -216,9 +224,10 @@ export default class AtprotoSyncPlugin extends Plugin {
         });
       }
       let progressNotice: Notice | null = null;
+      this.vaultAdapter = new ObsidianVaultAdapter(this.app, () => this.settings.ignorePatterns);
       this.engine = new SyncEngine({
         pds: this.pdsClient,
-        vault: new ObsidianVaultAdapter(this.app, () => this.settings.ignorePatterns),
+        vault: this.vaultAdapter,
         index: this.store,
         masterKey: await fromB64(s.masterKeyB64),
         vaultRkey: s.vaultRkey,
@@ -237,6 +246,7 @@ export default class AtprotoSyncPlugin extends Plugin {
       await this.runSync();
     } catch (err) {
       this.engine = null;
+      this.vaultAdapter = null;
       this.setStatus('error');
       new Notice(`ATProto Sync: could not connect — ${err instanceof Error ? err.message : err}`);
     }
@@ -244,6 +254,7 @@ export default class AtprotoSyncPlugin extends Plugin {
 
   disconnectEngine(): void {
     this.engine = null;
+    this.vaultAdapter = null;
     this.pdsClient = null;
     this.setStatus('setup');
   }

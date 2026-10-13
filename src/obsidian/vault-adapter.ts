@@ -1,6 +1,6 @@
-import { App, TFile, normalizePath } from 'obsidian';
+import { App, TFile, TFolder, normalizePath } from 'obsidian';
 import type { VaultAdapter } from '../sync/engine';
-import type { LocalFile } from '../sync/reconcile';
+import type { LocalFile, RenameHint } from '../sync/reconcile';
 import { sha256Hex } from '../lexicon/build';
 import { isIgnored } from './ignore';
 
@@ -37,10 +37,59 @@ export class ObsidianVaultAdapter implements VaultAdapter {
   }
 
   async remove(path: string): Promise<void> {
-    const file = this.app.vault.getAbstractFileByPath(normalizePath(path.normalize('NFC')));
+    const p = normalizePath(path.normalize('NFC'));
+    const file = this.app.vault.getAbstractFileByPath(p);
     if (file) {
       await this.app.fileManager.trashFile(file); // respects the user's deletion preference
     }
+    await this.pruneEmptyFolders(p);
+  }
+
+  /**
+   * Remove the now-empty folders above a deleted file so a folder deleted or
+   * renamed on another device disappears here too. A folder counts as empty
+   * when it has no subfolders and only hidden files (e.g. .DS_Store) left,
+   * which go to the trash with it; the vault root is never touched.
+   */
+  private async pruneEmptyFolders(filePath: string): Promise<void> {
+    const parts = filePath.split('/');
+    for (let depth = parts.length - 1; depth >= 1; depth--) {
+      const dir = parts.slice(0, depth).join('/');
+      const folder = this.app.vault.getAbstractFileByPath(dir);
+      if (!(folder instanceof TFolder) || folder.isRoot()) return;
+      let listing: { files: string[]; folders: string[] };
+      try {
+        listing = await this.app.vault.adapter.list(dir);
+      } catch {
+        return;
+      }
+      const onlyHidden = listing.files.every((f) => (f.split('/').pop() ?? f).startsWith('.'));
+      if (listing.folders.length > 0 || !onlyHidden) return;
+      try {
+        await this.app.fileManager.trashFile(folder);
+      } catch {
+        return; // leave it; nothing else depends on this
+      }
+    }
+  }
+
+  private pendingRenames: RenameHint[] = [];
+
+  /**
+   * Record a vault `rename` event (file or folder). Paths NFC-normalize here;
+   * the engine drains them at the start of the next sync.
+   */
+  noteRename(oldPath: string, newPath: string): void {
+    const from = normalizePath(oldPath.normalize('NFC'));
+    const to = normalizePath(newPath.normalize('NFC'));
+    if (from === to) return;
+    this.pendingRenames.push({ from, to });
+  }
+
+  async takeRenames(): Promise<RenameHint[]> {
+    const out = this.pendingRenames;
+    this.pendingRenames = [];
+    return out;
   }
 
   /** sha256 cache keyed by path|mtime|size so unchanged files hash once. */

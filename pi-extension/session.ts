@@ -83,7 +83,11 @@ export async function runSync(
   let ops = 0;
   const engine = new SyncEngine({
     pds,
-    vault: new FsVaultAdapter(vaultDir, () => cfg.ignorePatterns),
+    vault: new FsVaultAdapter(
+      vaultDir,
+      () => cfg.ignorePatterns,
+      path.join(vaultDir, '.atpsync', 'inodes.json')
+    ),
     index: new FsIndexStore(path.join(vaultDir, '.atpsync', 'index.json')),
     masterKey,
     vaultRkey: cfg.vaultRkey,
