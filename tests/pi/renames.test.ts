@@ -69,6 +69,18 @@ describe('FsVaultAdapter.takeRenames (inode tracking)', () => {
     ]);
   });
 
+  it('detects a file moved from one folder to another', async () => {
+    const dir = await mkvault('move');
+    await fs.mkdir(path.join(dir, 'Inbox'));
+    await fs.mkdir(path.join(dir, 'Archive'));
+    await fs.writeFile(path.join(dir, 'Inbox', 'note.md'), 'n');
+    const v = adapter(dir);
+    await v.takeRenames();
+
+    await fs.rename(path.join(dir, 'Inbox', 'note.md'), path.join(dir, 'Archive', 'note.md'));
+    expect(await v.takeRenames()).toEqual([{ from: 'Inbox/note.md', to: 'Archive/note.md' }]);
+  });
+
   it('ignores plain creates, deletes, in-place edits and ignored paths', async () => {
     const dir = await mkvault('noise');
     await fs.writeFile(path.join(dir, 'keep.md'), 'k');
@@ -155,6 +167,31 @@ describe('two filesystem devices', () => {
       expect((await fs.readdir(path.join(dir, 'Projects'))).sort()).toEqual(['one.md', 'pic.png', 'two.md']);
       expect(await fs.readFile(path.join(dir, 'Projects', 'two.md'), 'utf8')).toBe('two edited');
     }
+  });
+
+  it('moving a file between folders on one device moves it on the other and drops the emptied folder', async () => {
+    const pds = new FakePds();
+    const master = new Uint8Array(32).fill(6);
+    const dirA = await mkvault('mvA');
+    const dirB = await mkvault('mvB');
+    const a = engine(pds, dirA, master);
+    const b = engine(pds, dirB, master);
+
+    await fs.mkdir(path.join(dirA, 'Inbox'));
+    await fs.writeFile(path.join(dirA, 'Inbox', 'note.md'), 'draft');
+    await a.sync();
+    await b.sync();
+    const [rkey] = (await pds.listRecords(NOTE_COLLECTION)).map((r) => r.rkey);
+
+    await fs.mkdir(path.join(dirA, 'Archive'));
+    await fs.rename(path.join(dirA, 'Inbox', 'note.md'), path.join(dirA, 'Archive', 'note.md'));
+    await fs.appendFile(path.join(dirA, 'Archive', 'note.md'), ' done');
+    await a.sync();
+    await b.sync();
+
+    expect((await pds.listRecords(NOTE_COLLECTION)).map((r) => r.rkey)).toEqual([rkey]);
+    expect(await fs.readFile(path.join(dirB, 'Archive', 'note.md'), 'utf8')).toBe('draft done');
+    expect(await exists(path.join(dirB, 'Inbox'))).toBe(false);
   });
 
   it('deleting a folder on one device removes it entirely on the other', async () => {
