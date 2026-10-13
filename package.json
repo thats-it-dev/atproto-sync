@@ -9,7 +9,11 @@
     "build": "node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs"
   },
-  "keywords": [],
+  "keywords": [
+    "obsidian",
+    "atproto",
+    "pi-package"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -32,5 +36,14 @@
     "@atproto/oauth-client-browser": "^0.5.3",
     "diff-match-patch": "^1.0.5",
     "libsodium-wrappers-sumo": "^0.8.4"
+  },
+  "pi": {
+    "extensions": [
+      "./pi-extension/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
   }
 }
