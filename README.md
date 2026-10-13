@@ -61,6 +61,13 @@ The sync engine, crypto, and reconciler are plain TypeScript with no Obsidian
 dependency and are fully unit-tested; see `docs/` for the design documents and
 the manual testing guide (including a local Docker PDS setup).
 
+## pi extension (sync without Obsidian)
+
+[`pi-extension/`](pi-extension/README.md) runs the same engine against a plain vault directory
+from the [pi](https://github.com/earendil-works/pi) coding agent: `/atpsync setup|sync|status|
+publish|unpublish|watch`, plus `atpsync_*` tools the model can call. App-password auth, config in
+`~/.config/atpsync/`, index in `<vault>/.atpsync/`.
+
 ## License
 
 [MIT](LICENSE)
