@@ -11,7 +11,10 @@ explicitly publish, plaintext with a public slug).
 Reuses the plugin's pure core (`src/sync`, `src/crypto`, `src/lexicon`, `src/publish`,
 `src/obsidian/pds-client`, `src/obsidian/ignore`) and adds:
 
-- `fs-vault.ts` — a `VaultAdapter` over a plain directory (read/write markdown + binary attachments)
+- `fs-vault.ts` — a `VaultAdapter` over a plain directory (read/write markdown + binary attachments).
+  Detects local renames by file identity (inode + birth time, persisted in
+  `<vault>/.atpsync/inodes.json`) so a moved or renamed file/folder keeps its record even when
+  it was also edited; removes directories a delete or move left empty
 - `fs-store.ts` — the sync index as `<vault>/.atpsync/index.json` (atomic writes)
 - `config.ts` — auth + vault binding in `~/.config/atpsync/config.json` (chmod 0600)
 - `setup.ts` / `resolve-pds.ts` — app-password login, handle→DID→PDS resolution, vault create/unlock
@@ -72,7 +75,8 @@ The model can also drive all of the above through tools: `atpsync_status`, `atps
 
 - **Global** (`~/.config/atpsync/config.json`): handle, app password, PDS override, `vaultRkey`,
   cached master key, `vaultDir`, ignore patterns, sync interval.
-- **Per vault** (`<vault>/.atpsync/index.json`): the rkey/CID index the engine reconciles against.
+- **Per vault** (`<vault>/.atpsync/index.json`): the rkey/CID index the engine reconciles against;
+  `<vault>/.atpsync/inodes.json`: the path → file identity map rename detection compares against.
   `.atpsync/` is in the default ignore list so it is never synced.
 
 Vault directory for sync/status/publish/watch: the `vaultDir` param (sync tool), else

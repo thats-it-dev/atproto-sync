@@ -51,6 +51,7 @@ describe('reconcile: concurrent edits', () => {
       {
         kind: 'merge',
         path: 'a.md',
+        localPath: 'a.md',
         rkey: 'r1',
         base: 'base text',
         local: 'local edit',
@@ -123,6 +124,7 @@ describe('reconcile: duplicate remote records at one path', () => {
       {
         kind: 'merge',
         path: 'a.md',
+        localPath: 'a.md',
         rkey: 'r1',
         base: '',
         local: 'mine',
@@ -214,6 +216,7 @@ describe('reconcile: creates', () => {
       {
         kind: 'merge',
         path: 'both.md',
+        localPath: 'both.md',
         rkey: 'r2',
         base: '',
         local: 'local version',

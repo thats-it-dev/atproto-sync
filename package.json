@@ -1,6 +1,6 @@
 {
   "name": "atproto-sync",
-  "version": "0.1.0",
+  "version": "0.1.12",
   "description": "Sync your Obsidian vault to your ATProto PDS, E2E-encrypted, with per-note publishing.",
   "main": "main.js",
   "scripts": {
