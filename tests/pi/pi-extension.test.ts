@@ -6,7 +6,7 @@ import { FakePds } from '../../src/sync/fake-pds';
 import { SyncEngine } from '../../src/sync/engine';
 import { FsVaultAdapter } from '../../pi-extension/fs-vault';
 import { FsIndexStore } from '../../pi-extension/fs-store';
-import { DEFAULT_CONFIG, loadConfig, resolveVaultDir, saveConfig } from '../../pi-extension/config';
+import { DEFAULT_CONFIG, expandVaultPath, loadConfig, saveConfig } from '../../pi-extension/config';
 import { createVault, listVaults, unlockVault, WrongPassphraseError } from '../../pi-extension/setup';
 
 const IGNORES = ['.obsidian/', '.atpsync/', '.git/'];
@@ -94,12 +94,18 @@ describe('config', () => {
       const cfg = await loadConfig();
       expect(cfg.identifier).toBe('m.bsky.social');
       expect(cfg.appPassword).toBe('pw');
-      expect(resolveVaultDir(cfg, '/some/cwd')).toBe('/some/cwd');
       const st = await fs.stat(path.join(cfgDir, 'config.json'));
       expect((st.mode & 0o777) & ~0o600).toBe(0);
     } finally {
       delete process.env.ATPSYNC_CONFIG_DIR;
     }
+  });
+
+  it('expandVaultPath resolves relative paths against the cwd and expands ~', () => {
+    expect(expandVaultPath('notes', '/some/cwd')).toBe('/some/cwd/notes');
+    expect(expandVaultPath('/abs/dir/', '/some/cwd')).toBe('/abs/dir');
+    expect(expandVaultPath('~', '/some/cwd')).toBe(os.homedir());
+    expect(expandVaultPath('~/notes', '/some/cwd')).toBe(path.join(os.homedir(), 'notes'));
   });
 
   it('returns defaults when no config exists', async () => {

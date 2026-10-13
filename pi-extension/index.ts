@@ -190,7 +190,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(watchTool);
 
   pi.registerCommand('atpsync', {
-    description: 'ATProto Sync vault sync: /atpsync [setup|status|sync|publish <path> [slug]|unpublish <path>|watch [on|off]|logout|help]',
+    description: 'ATProto Sync vault sync: /atpsync [setup [folder]|status|sync|publish <path> [slug]|unpublish <path>|watch [on|off]|logout|help]',
     handler: async (args, ctx) => {
       const parts = args.trim().split(/\s+/);
       const cmd = parts[0]?.toLowerCase() ?? 'help';
@@ -201,7 +201,7 @@ export default function (pi: ExtensionAPI) {
           case 'h': {
             ctx.ui.notify([
               'ATProto Sync usage:',
-              '  /atpsync setup            one-time login + vault + passphrase (binds this folder)',
+              '  /atpsync setup [folder]   one-time login + vault folder + passphrase (default: prompt)',
               '  /atpsync status           account, vault, counts, watcher',
               '  /atpsync sync             sync now',
               '  /atpsync publish <path> [slug]',
@@ -266,6 +266,7 @@ export default function (pi: ExtensionAPI) {
             await runSetup({
               cwd: ctx.cwd,
               hasUI: ctx.hasUI,
+              vaultDir: parts.slice(1).join(' ') || undefined,
               input: (title, placeholder) => ctx.ui.input(title, placeholder),
               select: (title, options) => ctx.ui.select(title, options),
               notify: (m, t) => ctx.ui.notify(m, t),

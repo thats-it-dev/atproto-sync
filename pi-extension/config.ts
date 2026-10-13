@@ -20,7 +20,7 @@ export interface AtpsyncConfig {
   vaultRkey: string;
   /** Cached master key (base64, device-local). Set after passphrase entry. */
   masterKeyB64: string;
-  /** Absolute vault dir; empty => process cwd (or ATPSYNC_VAULT_DIR). */
+  /** Absolute vault dir bound by setup; empty until setup runs. */
   vaultDir: string;
   ignorePatterns: string[];
   syncIntervalMinutes: number;
@@ -73,10 +73,26 @@ export function isConfigured(cfg: AtpsyncConfig): boolean {
   return Boolean(cfg.identifier && cfg.appPassword && cfg.vaultRkey && cfg.masterKeyB64);
 }
 
-/** Vault dir for setup: explicit arg > env > config > process cwd (the folder being bound). */
-export function resolveVaultDir(cfg: AtpsyncConfig, cwd: string, explicit?: string): string {
-  const dir = explicit || process.env.ATPSYNC_VAULT_DIR || cfg.vaultDir || cwd;
-  return path.resolve(dir);
+/** Expand a leading `~` and resolve relative paths against cwd. */
+export function expandVaultPath(input: string, cwd: string): string {
+  let p = input.trim();
+  if (p === '~' || p.startsWith('~/')) p = path.join(os.homedir(), p.slice(1));
+  return path.resolve(cwd, p);
+}
+
+/**
+ * Make sure the vault folder exists, creating it (and parents) if missing.
+ * Rejects a path that exists but is not a directory.
+ */
+export async function ensureVaultDir(dir: string): Promise<void> {
+  let st;
+  try {
+    st = await fs.stat(dir);
+  } catch {
+    await fs.mkdir(dir, { recursive: true });
+    return;
+  }
+  if (!st.isDirectory()) throw new Error(`Vault path "${dir}" exists but is not a directory.`);
 }
 
 /**
@@ -88,7 +104,7 @@ export function boundVaultDir(cfg: AtpsyncConfig, explicit?: string): string {
   const dir = explicit || process.env.ATPSYNC_VAULT_DIR || cfg.vaultDir;
   if (!dir) {
     throw new Error(
-      'No vault directory is bound. Run /atpsync setup inside the vault folder, or set ATPSYNC_VAULT_DIR.'
+      'No vault directory is bound. Run /atpsync setup [folder], or set ATPSYNC_VAULT_DIR.'
     );
   }
   return path.resolve(dir);

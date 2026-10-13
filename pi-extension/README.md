@@ -39,14 +39,16 @@ Or make it permanent: copy/symlink `pi-extension/` into `~/.pi/agent/extensions/
 ## Setup (once per machine)
 
 ```
-/atpsync setup
+/atpsync setup [folder]
 ```
 
-Run it **inside the vault folder**: setup binds the current directory as the vault directory
-and remembers it. Interactive flow: enter your handle, app password, pick or create a vault,
-and set the encryption passphrase. In headless (non-UI) pi, the same inputs come from env:
-`ATPSYNC_HANDLE`, `ATPSYNC_APP_PASSWORD`, `ATPSYNC_PASSPHRASE`, plus either
-`ATPSYNC_VAULT_RKEY` (join an existing vault) or `ATPSYNC_VAULT_NAME` (create one).
+Setup asks which folder to sync (or takes it as the argument; `~` and relative paths work) and
+remembers it in the config. The prompt defaults to the folder bound last time, or the current
+directory on first run. A folder that doesn't exist yet is created. Then: enter your handle, app
+password, pick or create a vault, and set the encryption passphrase. In headless (non-UI) pi, the
+same inputs come from env: `ATPSYNC_HANDLE`, `ATPSYNC_APP_PASSWORD`, `ATPSYNC_VAULT_DIR`,
+`ATPSYNC_PASSPHRASE`, plus either `ATPSYNC_VAULT_RKEY` (join an existing vault) or
+`ATPSYNC_VAULT_NAME` (create one).
 
 Credentials are written to `~/.config/atpsync/config.json` (mode 0600). On later runs the
 passphrase is not re-prompted — the master key is cached locally, exactly like the plugin.
@@ -76,7 +78,8 @@ The model can also drive all of the above through tools: `atpsync_status`, `atps
 Vault directory for sync/status/publish/watch: the `vaultDir` param (sync tool), else
 `ATPSYNC_VAULT_DIR`, else `vaultDir` saved by setup. It never falls back to the working
 directory, so running `/atpsync sync` from an unrelated folder fails instead of pulling the
-whole vault into it. Only `/atpsync setup` uses the working directory, as the folder to bind.
+whole vault into it. `/atpsync setup` only uses the working directory to resolve a relative
+folder argument and as the first-run prompt default.
 
 ## Notes / differences from the plugin
 
