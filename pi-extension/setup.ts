@@ -11,7 +11,7 @@ import { makeCheckValue, verifyCheckValue } from '../src/crypto/check';
 import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '../src/crypto/keys';
 import type { PdsClient } from '../src/sync/pds';
 import { login as realLogin } from '../src/obsidian/pds-client';
-import { loadConfig, resolveVaultDir, saveConfig } from './config';
+import { ensureVaultDir, expandVaultPath, loadConfig, saveConfig } from './config';
 import { resolvePdsUrl } from './resolve-pds';
 
 export interface VaultInfo {
@@ -91,8 +91,11 @@ export async function unlockVault(
 
 /** The slice of pi's ExtensionContext that setup needs (so it can run against fakes). */
 export interface SetupIO {
+  /** Working directory; relative vault paths resolve against it and it is the first-run prompt default. */
   cwd: string;
   hasUI: boolean;
+  /** Vault folder given on the command line (`/atpsync setup <dir>`). */
+  vaultDir?: string;
   input(title: string, placeholder?: string): Promise<string | undefined>;
   select(title: string, options: string[]): Promise<string | undefined>;
   notify(message: string, type?: 'info' | 'warning' | 'error'): void;
@@ -108,11 +111,28 @@ const defaultDeps: SetupDeps = {
 };
 
 /**
- * Interactive onboarding: handle, app password, choose/create vault, passphrase.
- * Binds the cwd as the vault directory. Headless (no UI) runs take every input
- * from env: ATPSYNC_HANDLE, ATPSYNC_APP_PASSWORD, ATPSYNC_PASSPHRASE, and
- * optionally ATPSYNC_VAULT_RKEY (join an existing vault) / ATPSYNC_VAULT_NAME.
+ * Interactive onboarding: handle, app password, vault folder, choose/create
+ * vault, passphrase. The vault folder comes from the command argument, else
+ * ATPSYNC_VAULT_DIR, else a prompt (default: previously bound folder, or the
+ * cwd on first setup); it is created if missing. Headless (no UI) runs take
+ * every input from env: ATPSYNC_HANDLE, ATPSYNC_APP_PASSWORD, ATPSYNC_VAULT_DIR,
+ * ATPSYNC_PASSPHRASE, and optionally ATPSYNC_VAULT_RKEY (join an existing
+ * vault) / ATPSYNC_VAULT_NAME.
  */
+/** Command arg > ATPSYNC_VAULT_DIR > UI prompt (default: saved folder or cwd) > saved folder (headless). */
+async function chooseVaultDir(io: SetupIO, savedDir: string): Promise<string> {
+  const given = io.vaultDir?.trim() || process.env.ATPSYNC_VAULT_DIR?.trim();
+  if (given) return expandVaultPath(given, io.cwd);
+  if (io.hasUI) {
+    const fallback = savedDir || io.cwd;
+    const answer = await io.input(`Vault folder to sync (Enter for ${fallback})`, fallback);
+    if (answer === undefined) throw new Error('setup aborted');
+    return expandVaultPath(answer.trim() || fallback, io.cwd);
+  }
+  if (savedDir) return savedDir;
+  throw new Error('setup needs a vault folder: run /atpsync setup <dir>, or set ATPSYNC_VAULT_DIR when headless.');
+}
+
 export async function runSetup(io: SetupIO, deps: SetupDeps = defaultDeps): Promise<void> {
   const cfg = await loadConfig();
 
@@ -136,11 +156,13 @@ export async function runSetup(io: SetupIO, deps: SetupDeps = defaultDeps): Prom
     return;
   }
 
+  const vaultDir = await chooseVaultDir(io, cfg.vaultDir);
+  await ensureVaultDir(vaultDir);
+
   io.notify('ATProto Sync: signing in…', 'info');
   const pds = await deps.login(identifier, appPassword, cfg.pdsUrlOverride);
 
   const vaults = await listVaults(pds);
-  const vaultDir = resolveVaultDir(cfg, io.cwd);
   const defaultName = path.basename(vaultDir);
 
   const askPassphrase = (title: string) => ask(title, 'ATPSYNC_PASSPHRASE');

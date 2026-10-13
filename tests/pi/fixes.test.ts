@@ -152,12 +152,13 @@ describe('togglePublic', () => {
   });
 });
 
-describe('runSetup (headless)', () => {
-  function headlessIO(cwd: string): SetupIO & { notices: string[] } {
+describe('runSetup vault folder', () => {
+  function headlessIO(cwd: string, vaultDir?: string): SetupIO & { notices: string[] } {
     const notices: string[] = [];
     return {
       cwd,
       hasUI: false,
+      vaultDir,
       notices,
       input: async () => undefined,
       select: async () => undefined,
@@ -165,20 +166,66 @@ describe('runSetup (headless)', () => {
     };
   }
 
-  it('reads the passphrase from ATPSYNC_PASSPHRASE, creates a vault and binds the cwd as vaultDir', async () => {
-    await freshConfigDir();
-    const cwd = await fs.mkdtemp(path.join(tmp, 'su-'));
+  function headlessEnv(pass = 'hunter2') {
     process.env.ATPSYNC_HANDLE = 'me.test';
     process.env.ATPSYNC_APP_PASSWORD = 'pw';
-    process.env.ATPSYNC_PASSPHRASE = 'hunter2';
+    process.env.ATPSYNC_PASSPHRASE = pass;
+  }
+
+  it('binds the folder given as the setup argument, creating it if missing', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-'));
+    const target = path.join(cwd, 'new', 'vault');
+    headlessEnv();
     const pds = new FakePds();
-    await runSetup(headlessIO(cwd), { login: async () => pds });
+    await runSetup(headlessIO(cwd, target), { login: async () => pds });
     const cfg = await loadConfig();
     expect(cfg.identifier).toBe('me.test');
     expect(cfg.vaultRkey).not.toBe('');
-    expect(cfg.vaultDir).toBe(cwd);
+    expect(cfg.vaultDir).toBe(target);
+    expect((await fs.stat(target)).isDirectory()).toBe(true);
     const unlocked = await unlockVault(pds, cfg.vaultRkey, 'hunter2');
     expect(unlocked.masterKeyB64).toBe(cfg.masterKeyB64);
+  });
+
+  it('resolves a relative setup argument against the cwd and expands ~', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-rel-'));
+    headlessEnv();
+    await runSetup(headlessIO(cwd, 'notes'), { login: async () => new FakePds() });
+    expect((await loadConfig()).vaultDir).toBe(path.join(cwd, 'notes'));
+
+    await freshConfigDir();
+    await runSetup(headlessIO(cwd, '~'), { login: async () => new FakePds() });
+    expect((await loadConfig()).vaultDir).toBe(os.homedir());
+  });
+
+  it('falls back to ATPSYNC_VAULT_DIR when headless and no argument is given', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-env-'));
+    const target = path.join(cwd, 'from-env');
+    headlessEnv();
+    process.env.ATPSYNC_VAULT_DIR = target;
+    await runSetup(headlessIO(cwd), { login: async () => new FakePds() });
+    expect((await loadConfig()).vaultDir).toBe(target);
+    expect((await fs.stat(target)).isDirectory()).toBe(true);
+  });
+
+  it('never silently binds the cwd: headless with no folder anywhere is an error', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-none-'));
+    headlessEnv();
+    await expect(runSetup(headlessIO(cwd), { login: async () => new FakePds() })).rejects.toThrow(/ATPSYNC_VAULT_DIR|setup <dir>/);
+    expect((await loadConfig()).vaultRkey).toBe('');
+  });
+
+  it('refuses a path that exists but is not a directory', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-file-'));
+    const file = path.join(cwd, 'a-file');
+    await fs.writeFile(file, 'x');
+    headlessEnv();
+    await expect(runSetup(headlessIO(cwd, file), { login: async () => new FakePds() })).rejects.toThrow(/not a directory/i);
   });
 
   it('joins an existing vault when ATPSYNC_VAULT_RKEY is set', async () => {
@@ -186,15 +233,71 @@ describe('runSetup (headless)', () => {
     const cwd = await fs.mkdtemp(path.join(tmp, 'su2-'));
     const pds = new FakePds();
     const existing = await createVault(pds, 'Old', 'hunter2');
-    process.env.ATPSYNC_HANDLE = 'me.test';
-    process.env.ATPSYNC_APP_PASSWORD = 'pw';
-    process.env.ATPSYNC_PASSPHRASE = 'hunter2';
+    headlessEnv();
     process.env.ATPSYNC_VAULT_RKEY = existing.vaultRkey;
-    await runSetup(headlessIO(cwd), { login: async () => pds });
+    await runSetup(headlessIO(cwd, cwd), { login: async () => pds });
     const cfg = await loadConfig();
     expect(cfg.vaultRkey).toBe(existing.vaultRkey);
     expect(cfg.masterKeyB64).toBe(existing.masterKeyB64);
     expect((await pds.listRecords('app.notesky.vault')).length).toBe(1);
+  });
+
+  function uiIO(cwd: string, answers: Record<string, string | undefined>): SetupIO & { prompts: string[] } {
+    const prompts: string[] = [];
+    return {
+      cwd,
+      hasUI: true,
+      prompts,
+      input: async (title) => {
+        prompts.push(title);
+        const key = Object.keys(answers).find((k) => title.toLowerCase().includes(k));
+        return key ? answers[key] : undefined;
+      },
+      select: async () => undefined,
+      notify: () => {},
+    };
+  }
+
+  it('interactive: prompts for the folder and binds the answer', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-ui-'));
+    const target = path.join(cwd, 'picked');
+    await runSetup(
+      uiIO(cwd, { handle: 'me.test', 'app password': 'pw', folder: target, passphrase: 'hunter2', name: 'V' }),
+      { login: async () => new FakePds() }
+    );
+    expect((await loadConfig()).vaultDir).toBe(target);
+    expect((await fs.stat(target)).isDirectory()).toBe(true);
+  });
+
+  it('interactive: an empty answer takes the default, which is the cwd on first setup', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-ui-def-'));
+    const io = uiIO(cwd, { handle: 'me.test', 'app password': 'pw', folder: '', passphrase: 'hunter2', name: 'V' });
+    await runSetup(io, { login: async () => new FakePds() });
+    expect((await loadConfig()).vaultDir).toBe(cwd);
+    expect(io.prompts.find((p) => p.toLowerCase().includes('folder'))).toContain(cwd);
+  });
+
+  it('interactive: the default is the previously bound folder on re-setup', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-ui-prev-'));
+    const prev = path.join(cwd, 'prev');
+    await saveConfig({ ...DEFAULT_CONFIG, vaultDir: prev });
+    const io = uiIO(cwd, { handle: 'me.test', 'app password': 'pw', folder: '', passphrase: 'hunter2', name: 'V' });
+    await runSetup(io, { login: async () => new FakePds() });
+    expect((await loadConfig()).vaultDir).toBe(prev);
+    expect(io.prompts.find((p) => p.toLowerCase().includes('folder'))).toContain(prev);
+  });
+
+  it('interactive: the argument skips the folder prompt', async () => {
+    await freshConfigDir();
+    const cwd = await fs.mkdtemp(path.join(tmp, 'su-ui-arg-'));
+    const io = uiIO(cwd, { handle: 'me.test', 'app password': 'pw', passphrase: 'hunter2', name: 'V' });
+    io.vaultDir = path.join(cwd, 'arg');
+    await runSetup(io, { login: async () => new FakePds() });
+    expect((await loadConfig()).vaultDir).toBe(path.join(cwd, 'arg'));
+    expect(io.prompts.some((p) => p.toLowerCase().includes('folder'))).toBe(false);
   });
 });
 
