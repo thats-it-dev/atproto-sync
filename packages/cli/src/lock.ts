@@ -1,8 +1,10 @@
 /**
  * Cross-process vault lock: <vault>/.atpsync/lock created with O_EXCL.
- * The holder refreshes the file's mtime every heartbeatMs; a lock is stale if
- * its holder is a dead pid on this host, or its mtime is older than staleMs
- * (a crashed holder on another machine sharing the folder).
+ * The holder refreshes the file's mtime every heartbeatMs. A lock held on
+ * this host is stale exactly when its pid is dead (a live local holder may be
+ * suspended or stuck in a long sync; its heartbeat says nothing). A lock from
+ * another host, or one whose holder is unreadable, is stale once its mtime is
+ * older than staleMs (a crashed holder on another machine sharing the folder).
  */
 import { promises as fs, type Stats } from "node:fs";
 import * as os from "node:os";
@@ -59,11 +61,12 @@ export async function isStale(
   }
   const id = { ino: st.ino, dev: st.dev, birthtimeMs: st.birthtimeMs };
   const age = Date.now() - st.mtimeMs;
-  if (age > staleMs) return id;
   const holder = await readHolder(file);
+  if (holder && holder.host === os.hostname()) return isAlive(holder.pid) ? null : id;
+  if (age > staleMs) return id;
   // Unreadable: possibly mid-write by its creator; only stale once it is a few seconds old.
   if (!holder) return age > 5_000 ? id : null;
-  return holder.host === os.hostname() && !isAlive(holder.pid) ? id : null;
+  return null;
 }
 
 async function tryCreate(
@@ -142,16 +145,38 @@ export async function breakStale(
     moved.dev !== judged.dev ||
     moved.birthtimeMs !== judged.birthtimeMs
   ) {
-    try {
-      await fs.link(aside, file);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    }
-    await fs.rm(aside, { force: true });
+    await restore(aside, file);
     return false;
   }
   await fs.rm(aside, { force: true });
   return true;
+}
+
+/**
+ * Put a lock we moved by mistake back at `file` without clobbering a newer one.
+ * Hard link first (EEXIST if the path was re-taken). Filesystems without hard
+ * links (exFAT, some FUSE mounts) get a rename, but only while the path is free.
+ */
+async function restore(aside: string, file: string): Promise<void> {
+  try {
+    await fs.link(aside, file);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+      const free = await fs.stat(file).then(
+        () => false,
+        (e: NodeJS.ErrnoException) => e.code === "ENOENT",
+      );
+      if (free) {
+        try {
+          await fs.rename(aside, file);
+          return;
+        } catch {
+          // fall through: drop the moved copy
+        }
+      }
+    }
+  }
+  await fs.rm(aside, { force: true });
 }
 
 export async function acquireLock(

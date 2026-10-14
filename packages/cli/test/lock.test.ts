@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import { spawnSync } from "node:child_process";
@@ -42,7 +42,7 @@ describe("vault lock", () => {
     await l!.release();
   });
 
-  it("breaks a lock whose heartbeat is older than staleMs, even from another host", async () => {
+  it("breaks a lock from another host whose heartbeat is older than staleMs", async () => {
     const { vaultDir } = await tempEnv();
     await writeLock(
       vaultDir,
@@ -130,5 +130,36 @@ describe("vault lock", () => {
     expect(await fs.readFile(file, "utf8")).toBe(before);
     expect(await tryAcquireLock(vaultDir)).toBeNull();
     await a!.release();
+  });
+
+  it("never breaks a lock held by a live pid on this host, however old its heartbeat", async () => {
+    const { vaultDir } = await tempEnv();
+    await writeLock(
+      vaultDir,
+      { pid: process.pid, host: os.hostname(), startedAt: "x" },
+      10 * 60_000,
+    );
+    expect(await isStale(lockPath(vaultDir), 2 * 60_000)).toBeNull();
+    expect(await tryAcquireLock(vaultDir)).toBeNull();
+  });
+
+  it("restores a wrongly moved lock by rename where hard links are unsupported", async () => {
+    const { vaultDir } = await tempEnv();
+    await writeLock(vaultDir, { pid: 1, host: "other-host", startedAt: "fresh" });
+    const file = lockPath(vaultDir);
+    const before = await fs.readFile(file, "utf8");
+    const st = await fs.stat(file);
+    const link = vi
+      .spyOn(fs, "link")
+      .mockRejectedValue(Object.assign(new Error("EPERM"), { code: "EPERM" }));
+    try {
+      // Judged a different (older) file: the moved one must go back.
+      const judged = { ino: st.ino + 1, dev: st.dev, birthtimeMs: st.birthtimeMs };
+      expect(await breakStale(file, judged)).toBe(false);
+    } finally {
+      link.mockRestore();
+    }
+    expect(await fs.readFile(file, "utf8")).toBe(before);
+    expect(await fs.readdir(`${vaultDir}/.atpsync`)).toEqual(["lock"]);
   });
 });
