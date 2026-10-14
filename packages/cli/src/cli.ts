@@ -11,6 +11,7 @@ import { loadConfig } from './config';
 import { runDaemon } from './daemon';
 import { AtpsyncError, EXIT_CODES, toAtpsyncError } from './errors';
 import { createFileLogger } from './logger';
+import { runMcp } from './mcp';
 import { logPath } from './paths';
 import { createTtyIO } from './prompts';
 import { renderPublish, renderStatus, renderSync } from './render';
@@ -143,7 +144,9 @@ export async function main(argv: string[], env: CliEnv = defaultEnv()): Promise<
       case 'logs':
         await logsCommand({ follow: Boolean(values.follow), write: env.io.stdout });
         return 0;
-      // 'mcp' is added in Task 10.
+      case 'mcp':
+        await runMcp(deps, env.ctl);
+        return 0;
       default:
         throw new AtpsyncError('USAGE', `Unknown command "${cmd}".\n\n${USAGE}`);
     }
