@@ -335,6 +335,20 @@ describe('FsVaultAdapter walk', () => {
   });
 });
 
+describe('FsVaultAdapter internal files', () => {
+  it('never lists .atpsync/, even with an empty ignore list', async () => {
+    const dir = await fs.mkdtemp(path.join(tmp, 'int-'));
+    await fs.mkdir(path.join(dir, '.atpsync'));
+    await fs.writeFile(path.join(dir, '.atpsync', 'index.json'), '[]');
+    await fs.writeFile(path.join(dir, '.atpsync', 'notes.md'), 'x');
+    await fs.writeFile(path.join(dir, 'a.md'), 'x');
+    const vault = new FsVaultAdapter(dir, () => []);
+    expect((await vault.readAll()).map((f) => f.path)).toEqual(['a.md']);
+    expect(await vault.readAllAttachments()).toEqual([]);
+    expect(await vault.countMarkdown()).toBe(1);
+  });
+});
+
 describe('FsVaultAdapter attachment hash cache', () => {
   it('only retains entries for attachments that still exist', async () => {
     const dir = await fs.mkdtemp(path.join(tmp, 'hc-'));

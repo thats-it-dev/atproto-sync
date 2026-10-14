@@ -258,4 +258,20 @@ describe('runDaemon', () => {
     await done;
     await new Promise<void>((r) => wss.close(() => r()));
   });
+
+  it('its own .atpsync/ writes never trigger a sync, even with an empty ignore list', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir, { ignorePatterns: [] });
+    await saveConfig(cfg);
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'x');
+    const pds = new FakePds();
+    const { deps, signals, logs } = harness(cfg, async () => ({ pds, did: 'did:plc:me', pdsUrl: 'http://fake' }));
+    const done = runDaemon(deps);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+    await sleep(300); // well past the fs debounce
+    expect(logs.filter((l) => l.startsWith('I sync (fs)'))).toEqual([]);
+    expect((await pds.listRecords('app.notesky.note')).length).toBe(1);
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+  });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { FakePds } from '@atproto-sync/core/sync/fake-pds';
 import { DEFAULT_CONFIG, saveConfig, type AtpsyncConfig } from '../src/config';
@@ -9,6 +10,8 @@ import { syncCommand } from '../src/commands/sync';
 import { publishCommand } from '../src/commands/publish';
 import { renderStatus } from '../src/render';
 import { tryAcquireLock } from '../src/lock';
+import { daemonStatePath } from '../src/paths';
+import { writePidExclusive } from '../src/pidfile';
 import { clearAtpsyncEnv, configuredCfg, tempEnv } from './helpers';
 
 afterEach(clearAtpsyncEnv);
@@ -104,6 +107,27 @@ describe('commands', () => {
     const st = await statusCommand(deps);
     expect(st.remote).toEqual({ notes: 1, attachments: 0 });
     expect(connects).toBe(2);
+  });
+
+  it('status ignores daemon.json written by another machine sharing the folder', async () => {
+    const { vaultDir, cfg } = await setup();
+    const foreign = {
+      pid: process.ppid, host: 'some-other-host', startedAt: 'x', connection: 'subscribed',
+      lastSyncAt: '2020-01-01T00:00:00.000Z', lastResult: 'error', lastError: 'their error', lastExit: 'their exit',
+    };
+    await fs.mkdir(path.dirname(daemonStatePath(vaultDir)), { recursive: true });
+    await fs.writeFile(daemonStatePath(vaultDir), JSON.stringify(foreign));
+    const stopped = await statusCommand(depsFor(cfg));
+    expect(stopped.daemon).toEqual({ running: false, pid: null, connection: null, lastSyncAt: null, lastError: null, lastExit: null });
+
+    // A daemon runs here, but daemon.json names another pid: still not ours.
+    await writePidExclusive(process.ppid);
+    await fs.writeFile(daemonStatePath(vaultDir), JSON.stringify({ ...foreign, host: os.hostname(), pid: process.pid }));
+    const running = await statusCommand(depsFor(cfg));
+    expect(running.daemon).toMatchObject({ running: true, pid: process.ppid, connection: null, lastError: null });
+
+    await fs.writeFile(daemonStatePath(vaultDir), JSON.stringify({ ...foreign, host: os.hostname() }));
+    expect((await statusCommand(depsFor(cfg))).daemon).toMatchObject({ running: true, connection: 'subscribed', lastError: 'their error' });
   });
 
   it('never exposes the app password or master key', async () => {

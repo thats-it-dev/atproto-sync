@@ -12,6 +12,14 @@ import type { LocalFile } from '@atproto-sync/core/sync/reconcile';
 
 const MARKDOWN_RE = /\.md$/i;
 
+/** atpsync's own per-vault files (index, lock, daemon state): never synced, whatever the user's ignore list says. */
+export const INTERNAL_IGNORES = ['.atpsync/'];
+
+/** The user's ignore patterns plus atpsync's internal directory. */
+export function withInternalIgnores(patterns: string[]): string[] {
+  return [...INTERNAL_IGNORES, ...patterns];
+}
+
 export function isMarkdownPath(relPath: string): boolean {
   return MARKDOWN_RE.test(relPath);
 }
@@ -43,6 +51,10 @@ export class FsVaultAdapter implements VaultAdapter {
     private readonly ignorePatterns: () => string[],
   ) {}
 
+  private ignored(rel: string): boolean {
+    return isIgnored(rel, withInternalIgnores(this.ignorePatterns()));
+  }
+
   private toAbs(relPath: string): string {
     return resolveInsideVault(this.root, relPath);
   }
@@ -64,7 +76,7 @@ export class FsVaultAdapter implements VaultAdapter {
         // Skip ignored directories outright (.git, node_modules, ...) instead of
         // walking and stat'ing everything beneath them. Prefix patterns match
         // "<dir>/"; file globs like "*.tmp" never match a trailing slash.
-        if (isIgnored(`${this.toRel(full)}/`, this.ignorePatterns())) continue;
+        if (this.ignored(`${this.toRel(full)}/`)) continue;
         yield* this.walk(full);
       } else if (ent.isFile()) {
         yield full;
@@ -77,7 +89,7 @@ export class FsVaultAdapter implements VaultAdapter {
     for await (const abs of this.walk(this.root)) {
       const rel = this.toRel(abs);
       if (!MARKDOWN_RE.test(rel)) continue;
-      if (isIgnored(rel, this.ignorePatterns())) continue;
+      if (this.ignored(rel)) continue;
       out.push({ path: rel, content: await fs.readFile(abs, 'utf8') });
     }
     return out;
@@ -89,7 +101,7 @@ export class FsVaultAdapter implements VaultAdapter {
     for await (const abs of this.walk(this.root)) {
       const rel = this.toRel(abs);
       if (MARKDOWN_RE.test(rel)) continue;
-      if (isIgnored(rel, this.ignorePatterns())) continue;
+      if (this.ignored(rel)) continue;
       const stat = await fs.stat(abs);
       const cacheKey = `${rel}|${stat.mtimeMs}|${stat.size}`;
       let hash = this.hashCache.get(cacheKey);
@@ -131,7 +143,7 @@ export class FsVaultAdapter implements VaultAdapter {
     for await (const abs of this.walk(this.root)) {
       const rel = this.toRel(abs);
       if (!MARKDOWN_RE.test(rel)) continue;
-      if (isIgnored(rel, this.ignorePatterns())) continue;
+      if (this.ignored(rel)) continue;
       n++;
     }
     return n;

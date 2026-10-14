@@ -1,3 +1,4 @@
+import * as os from 'node:os';
 import { boundVaultDir } from '../config';
 import { readDaemonState, type DaemonState } from '../daemon-state';
 import { readLivePid } from '../pidfile';
@@ -27,16 +28,19 @@ export async function statusCommand(deps: CommandDeps): Promise<StatusResult> {
     readDaemonState(vaultDir),
   ]);
   const running = pid !== null;
+  // daemon.json lives in the vault, which may be a folder shared with other
+  // machines: only trust a record written on this host (by this daemon, if one runs).
+  const mine = state && state.host === os.hostname() && (!running || state.pid === pid) ? state : null;
   return {
     ok: true,
     ...vault,
     daemon: {
       running,
       pid,
-      connection: running ? (state?.connection ?? null) : null,
-      lastSyncAt: state?.lastSyncAt ?? null,
-      lastError: state?.lastError ?? null,
-      lastExit: running ? null : (state?.lastExit ?? null),
+      connection: running ? (mine?.connection ?? null) : null,
+      lastSyncAt: mine?.lastSyncAt ?? null,
+      lastError: mine?.lastError ?? null,
+      lastExit: running ? null : (mine?.lastExit ?? null),
     },
   };
 }

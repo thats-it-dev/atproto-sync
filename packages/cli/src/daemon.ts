@@ -9,6 +9,7 @@ import { isIgnored } from '@atproto-sync/core/sync/ignore';
 import { boundVaultDir, isConfigured, type AtpsyncConfig } from './config';
 import { DaemonStateWriter } from './daemon-state';
 import { AtpsyncError } from './errors';
+import { withInternalIgnores } from './fs-vault';
 import { watchVault } from './fs-watch';
 import { tryAcquireLock } from './lock';
 import type { Logger } from './logger';
@@ -216,7 +217,7 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
 
   const unwatch = watchVault(
     vaultDir,
-    (rel) => isIgnored(rel, cfg0.ignorePatterns),
+    (rel) => isIgnored(rel, withInternalIgnores(cfg0.ignorePatterns)),
     () => scheduler.trigger('fs'),
     (m) => log.warn(m)
   );
