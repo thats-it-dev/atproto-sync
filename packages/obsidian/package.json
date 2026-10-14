@@ -1,0 +1,23 @@
+{
+  "name": "@atproto-sync/obsidian",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@atproto-sync/core": "workspace:*",
+    "@atproto/api": "^0.20.41",
+    "@atproto/oauth-client": "^0.8.3",
+    "@atproto/oauth-client-browser": "^0.5.3"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "obsidian": "^1.13.1",
+    "tslib": "^2.8.1"
+  }
+}

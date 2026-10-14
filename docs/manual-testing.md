@@ -42,7 +42,7 @@ Cleanup afterwards: `docker rm -f notesky-test-pds && docker volume rm notesky-p
 NOTESKY_PDS_URL=http://localhost:3000 \
 NOTESKY_HANDLE=tester.test \
 NOTESKY_PASSWORD=notesky-test-pass \
-pnpm vitest run tests/obsidian/pds-client.integration.test.ts tests/sync/engine-live.integration.test.ts
+pnpm vitest run packages/core/test/atproto/pds-client.integration.test.ts packages/core/test/sync/engine-live.integration.test.ts
 ```
 
 Both must pass before bothering with the UI steps.

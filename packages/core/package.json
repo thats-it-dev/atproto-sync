@@ -1,0 +1,22 @@
+{
+  "name": "@atproto-sync/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@atproto/api": "^0.20.41",
+    "diff-match-patch": "^1.0.5",
+    "libsodium-wrappers-sumo": "^0.8.4"
+  },
+  "devDependencies": {
+    "@types/diff-match-patch": "^1.0.36",
+    "@types/libsodium-wrappers-sumo": "^0.7.8"
+  }
+}

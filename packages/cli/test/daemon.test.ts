@@ -1,0 +1,277 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import type { AddressInfo } from 'node:net';
+import { encode } from 'cborg';
+import { WebSocketServer } from 'ws';
+import { FakePds } from '@atproto-sync/core/sync/fake-pds';
+import { saveConfig, type AtpsyncConfig } from '../src/config';
+import { runDaemon, type DaemonDeps } from '../src/daemon';
+import { readDaemonState } from '../src/daemon-state';
+import { pidPath, stateDir } from '../src/paths';
+import { runSync } from '../src/session';
+import { createFileLogger } from '../src/logger';
+import { AtpsyncError } from '../src/errors';
+import { sleep } from './helpers';
+import { clearAtpsyncEnv, configuredCfg, tempEnv, waitFor } from './helpers';
+
+afterEach(clearAtpsyncEnv);
+
+describe('createFileLogger', () => {
+  it('appends timestamped lines and rolls over once past maxBytes', async () => {
+    const { root } = await tempEnv();
+    const file = path.join(root, 'state', 'daemon.log');
+    const log = createFileLogger(file, { maxBytes: 100 });
+    log.info('hello');
+    expect(await fs.readFile(file, 'utf8')).toMatch(/^\d{4}-\d\d-\d\dT.* INFO hello\n$/);
+    log.rotateIfNeeded();
+    await expect(fs.access(`${file}.1`)).rejects.toThrow(); // still small
+    for (let i = 0; i < 10; i++) log.warn('x'.repeat(20));
+    log.rotateIfNeeded();
+    expect((await fs.readFile(`${file}.1`, 'utf8')).length).toBeGreaterThan(100);
+    log.error('after');
+    expect(await fs.readFile(file, 'utf8')).toMatch(/ERROR after/);
+  });
+});
+
+const FAST = { startup: 0, fs: 50, remote: 20, poll: 0 };
+
+function harness(cfg: AtpsyncConfig, connect: DaemonDeps['connect']) {
+  const signals = new EventEmitter();
+  const logs: string[] = [];
+  const log = { info: (m: string) => logs.push(`I ${m}`), warn: (m: string) => logs.push(`W ${m}`), error: (m: string) => logs.push(`E ${m}`) };
+  const deps: DaemonDeps = {
+    loadConfig: async () => cfg,
+    connect,
+    clearConnection: () => {},
+    log,
+    signals,
+    debounceMs: FAST,
+    subscriptionBackoffMs: { min: 20, max: 40 },
+  };
+  return { deps, signals, logs };
+}
+
+describe('runDaemon', () => {
+  it('claims the pidfile, syncs on startup and on file changes, and shuts down cleanly', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir);
+    await saveConfig(cfg);
+    const pds = new FakePds();
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'first');
+    const { deps, signals } = harness(cfg, async () => ({ pds, did: 'did:plc:me', pdsUrl: 'http://fake' }));
+
+    const done = runDaemon(deps);
+    await waitFor(async () => (await pds.listRecords('app.notesky.note')).length === 1);
+    expect(JSON.parse(await fs.readFile(pidPath(), 'utf8'))).toMatchObject({ pid: process.pid, bootTime: expect.any(Number) });
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+
+    await fs.writeFile(path.join(vaultDir, 'b.md'), 'second');
+    await waitFor(async () => (await pds.listRecords('app.notesky.note')).length === 2);
+
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+    await expect(fs.access(pidPath())).rejects.toThrow();
+    expect((await readDaemonState(vaultDir))?.lastExit).toMatch(/^stopped/);
+    await expect(fs.access(path.join(vaultDir, '.atpsync', 'lock'))).rejects.toThrow();
+  });
+
+  it('refuses to start when another live daemon holds the pidfile', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir);
+    await fs.mkdir(stateDir(), { recursive: true });
+    await fs.writeFile(pidPath(), String(process.ppid));
+    const { deps } = harness(cfg, async () => { throw new Error('unused'); });
+    await expect(runDaemon(deps)).rejects.toMatchObject({ code: 'ALREADY_RUNNING' });
+  });
+
+  it('stays up while the PDS is unreachable and recovers when it comes back', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir);
+    await saveConfig(cfg);
+    const pds = new FakePds();
+    let online = false;
+    const { deps, signals } = harness(cfg, async () => {
+      if (!online) throw new Error('connect ECONNREFUSED');
+      return { pds, did: 'did:plc:me', pdsUrl: 'http://fake' };
+    });
+    const done = runDaemon(deps);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastError === 'connect ECONNREFUSED');
+    expect((await readDaemonState(vaultDir))?.lastResult).toBe('error');
+
+    online = true;
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'x');
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+    expect((await readDaemonState(vaultDir))?.lastError).toBeNull();
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+  });
+
+  it('pulls a remote change as soon as the event stream reports it', async () => {
+    const { root, vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir, { remote: 'subscribe' });
+    await saveConfig(cfg);
+    const pds = new FakePds();
+    const wss = new WebSocketServer({ port: 0 });
+    await new Promise<void>((r) => wss.once('listening', () => r()));
+    const pdsUrl = `http://127.0.0.1:${(wss.address() as AddressInfo).port}`;
+    const { deps, signals } = harness(cfg, async () => ({ pds, did: 'did:plc:me', pdsUrl }));
+    // Long poll so only the stream can explain a quick pull.
+    deps.subscribedPollMs = 60 * 60_000;
+    const connected = new Promise<import('ws').WebSocket>((r) => wss.once('connection', (s) => r(s)));
+
+    const done = runDaemon(deps);
+    const sock = await connected;
+    await waitFor(async () => (await readDaemonState(vaultDir))?.connection === 'subscribed');
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+
+    // Device B writes a note straight to the PDS.
+    const dirB = path.join(root, 'deviceB');
+    await fs.mkdir(dirB);
+    await fs.writeFile(path.join(dirB, 'from-b.md'), 'hello from B');
+    await runSync({ ...cfg, vaultDir: dirB }, { pds });
+
+    const h = encode({ op: 1, t: '#commit' });
+    const b = encode({ repo: 'did:plc:me', ops: [{ action: 'create', path: 'app.notesky.note/x', cid: null }] });
+    sock.send(Buffer.concat([h, b]));
+    await waitFor(async () => {
+      try {
+        return (await fs.readFile(path.join(vaultDir, 'from-b.md'), 'utf8')) === 'hello from B';
+      } catch {
+        return false;
+      }
+    }, 3000);
+
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+    await new Promise<void>((r) => wss.close(() => r()));
+  });
+
+  it('after a rejected sign-in, never logs in again until the app password changes', async () => {
+    const { vaultDir } = await tempEnv();
+    let cfg = await configuredCfg(vaultDir, { remote: 'subscribe' });
+    await saveConfig(cfg);
+    const passwords: string[] = [];
+    const { deps, signals, logs } = harness(cfg, async (c) => {
+      passwords.push(c.appPassword);
+      throw new AtpsyncError('AUTH', 'Sign-in failed for me.test (Invalid identifier or password).');
+    });
+    deps.loadConfig = async () => cfg;
+    deps.pollMs = 30;
+
+    const done = runDaemon(deps);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.connection === 'auth-failed');
+    for (let i = 0; i < 3; i++) {
+      await fs.writeFile(path.join(vaultDir, `n${i}.md`), String(i));
+      await sleep(80);
+    }
+    await sleep(200); // several polls and event-stream reconnect attempts
+    expect(passwords).toEqual(['app-pw-SECRET']);
+    expect(logs.filter((l) => l.includes('sign-in rejected')).length).toBe(1);
+    expect((await readDaemonState(vaultDir))?.lastError).toMatch(/Sign-in failed/);
+
+    cfg = { ...cfg, appPassword: 'new-app-pw' };
+    await fs.writeFile(path.join(vaultDir, 'after.md'), 'x');
+    await waitFor(() => passwords.includes('new-app-pw'));
+    expect(passwords.filter((p) => p === 'app-pw-SECRET')).toHaveLength(1);
+    expect(logs.some((l) => l.includes('app password changed'))).toBe(true);
+
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+  });
+
+  it('shuts down when the config is rebound to another vault', async () => {
+    const { vaultDir } = await tempEnv();
+    let cfg = await configuredCfg(vaultDir);
+    await saveConfig(cfg);
+    const pds = new FakePds();
+    const { deps, logs } = harness(cfg, async () => ({ pds, did: 'did:plc:me', pdsUrl: 'http://fake' }));
+    deps.loadConfig = async () => cfg;
+    const done = runDaemon(deps);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+
+    cfg = { ...cfg, appPassword: 'rotated' }; // credentials alone: keep running
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'x');
+    await waitFor(async () => (await pds.listRecords('app.notesky.note')).length === 1);
+
+    cfg = { ...cfg, vaultRkey: 'vault2' };
+    await fs.writeFile(path.join(vaultDir, 'b.md'), 'y');
+    await done;
+    expect((await readDaemonState(vaultDir))?.lastExit).toBe('config changed; run `atpsync start`');
+    expect(logs.some((l) => l.includes('config changed'))).toBe(true);
+    await expect(fs.access(pidPath())).rejects.toThrow();
+  });
+
+  it('retries a failed sync with backoff, without any external trigger', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir);
+    await saveConfig(cfg);
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'x');
+    const pds = new FakePds();
+    const at: number[] = [];
+    const { deps, signals, logs } = harness(cfg, async () => {
+      at.push(Date.now());
+      if (at.length <= 2) throw new Error('connect ECONNREFUSED');
+      return { pds, did: 'did:plc:me', pdsUrl: 'http://fake' };
+    });
+    deps.retryBackoffMs = { min: 40, max: 1000 };
+    const done = runDaemon(deps);
+    await waitFor(async () => (await pds.listRecords('app.notesky.note')).length === 1, 3000);
+    expect(at).toHaveLength(3);
+    expect(at[2] - at[1]).toBeGreaterThanOrEqual(75); // second retry waits twice as long
+    expect(logs.filter((l) => l.includes('retrying in'))).toHaveLength(2);
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+  });
+
+  it('on a wall-clock jump (sleep/wake) reconnects the event stream and syncs', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir, { remote: 'subscribe' });
+    await saveConfig(cfg);
+    const pds = new FakePds();
+    const wss = new WebSocketServer({ port: 0 });
+    await new Promise<void>((r) => wss.once('listening', () => r()));
+    const pdsUrl = `http://127.0.0.1:${(wss.address() as AddressInfo).port}`;
+    let connections = 0;
+    wss.on('connection', () => connections++);
+    const { deps, signals, logs } = harness(cfg, async () => ({ pds, did: 'did:plc:me', pdsUrl }));
+    const syncs = () => logs.filter((l) => l.startsWith('I sync (startup)')).length;
+    deps.subscribedPollMs = 60 * 60_000;
+    let clock = 1_000_000;
+    deps.now = () => clock;
+    deps.wakeCheckMs = 20;
+    deps.wakeThresholdMs = 1000;
+    const done = runDaemon(deps);
+    await waitFor(() => connections === 1);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+    await sleep(100);
+    const before = syncs();
+    expect(logs.some((l) => l.includes('wake detected'))).toBe(false);
+
+    clock += 10 * 60_000; // the machine slept for ten minutes
+    await waitFor(() => logs.some((l) => l.includes('wake detected')));
+    await waitFor(() => connections === 2);
+    await waitFor(() => syncs() > before);
+
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+    await new Promise<void>((r) => wss.close(() => r()));
+  });
+
+  it('its own .atpsync/ writes never trigger a sync, even with an empty ignore list', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir, { ignorePatterns: [] });
+    await saveConfig(cfg);
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'x');
+    const pds = new FakePds();
+    const { deps, signals, logs } = harness(cfg, async () => ({ pds, did: 'did:plc:me', pdsUrl: 'http://fake' }));
+    const done = runDaemon(deps);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+    await sleep(300); // well past the fs debounce
+    expect(logs.filter((l) => l.startsWith('I sync (fs)'))).toEqual([]);
+    expect((await pds.listRecords('app.notesky.note')).length).toBe(1);
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+  });
+});
