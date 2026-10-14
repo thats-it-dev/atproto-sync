@@ -1,5 +1,5 @@
 /**
- * Global atpsync config for the pi extension / CLI.
+ * Global atpsync config for the atpsync CLI.
  *
  * Lives outside the vault at ~/.config/atpsync/config.json (0600). Holds auth
  * (app password), the vault binding (vaultRkey), and the cached master key.
@@ -24,6 +24,8 @@ export interface AtpsyncConfig {
   vaultDir: string;
   ignorePatterns: string[];
   syncIntervalMinutes: number;
+  /** Remote change detection: real-time subscribeRepos stream, or polling only. */
+  remote: 'subscribe' | 'poll';
   lastSyncAt?: string;
 }
 
@@ -37,7 +39,8 @@ export const DEFAULT_CONFIG: AtpsyncConfig = {
   masterKeyB64: '',
   vaultDir: '',
   ignorePatterns: [...DEFAULT_IGNORES],
-  syncIntervalMinutes: 5,
+  syncIntervalMinutes: 1,
+  remote: 'subscribe',
 };
 
 export function configDir(): string {
