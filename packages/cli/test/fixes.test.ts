@@ -252,6 +252,71 @@ describe('runSetup vault folder', () => {
   });
 });
 
+describe('runSetup sign-in', () => {
+  function io(hasUI: boolean, answers: Record<string, string> = {}): SetupIO & { prompts: string[] } {
+    const prompts: string[] = [];
+    return {
+      cwd: tmp,
+      hasUI,
+      prompts,
+      input: async (title) => {
+        prompts.push(title);
+        const key = Object.keys(answers).find((k) => title.toLowerCase().startsWith(k));
+        return key ? answers[key] : undefined;
+      },
+      select: async () => undefined,
+      notify: () => {},
+    };
+  }
+  const rejected = () => Object.assign(new Error('Invalid identifier or password'), { status: 401, error: 'AuthenticationRequired' });
+
+  it('interactive: re-prompts for a new app password when the saved one is rejected', async () => {
+    await freshConfigDir();
+    const dir = await fs.mkdtemp(path.join(tmp, 'su-auth-'));
+    await saveConfig({ ...DEFAULT_CONFIG, identifier: 'me.test', appPassword: 'revoked-pw', vaultDir: dir });
+    const tried: string[] = [];
+    const pds = new FakePds();
+    const ui = io(true, { 'new app password': 'fresh-pw', 'vault folder': dir, 'vault passphrase': 'hunter2', name: 'V' });
+    await runSetup(ui, {
+      login: async (_id, pw) => {
+        tried.push(pw);
+        if (pw === 'revoked-pw') throw rejected();
+        return pds;
+      },
+    });
+    expect(tried).toEqual(['revoked-pw', 'fresh-pw']);
+    expect(ui.prompts.some((p) => p.startsWith('New app password'))).toBe(true);
+    expect((await loadConfig()).appPassword).toBe('fresh-pw');
+  });
+
+  it('headless: uses a different ATPSYNC_APP_PASSWORD, else fails with AUTH', async () => {
+    await freshConfigDir();
+    const dir = await fs.mkdtemp(path.join(tmp, 'su-auth-h-'));
+    await saveConfig({ ...DEFAULT_CONFIG, identifier: 'me.test', appPassword: 'revoked-pw', vaultDir: dir });
+    process.env.ATPSYNC_PASSPHRASE = 'hunter2';
+    const login = async (_id: string, pw: string) => {
+      if (pw !== 'env-pw') throw rejected();
+      return new FakePds();
+    };
+    await expect(runSetup(io(false), { login })).rejects.toMatchObject({ code: 'AUTH' });
+    process.env.ATPSYNC_APP_PASSWORD = 'revoked-pw';
+    await expect(runSetup(io(false), { login })).rejects.toMatchObject({ code: 'AUTH' });
+    process.env.ATPSYNC_APP_PASSWORD = 'env-pw';
+    await runSetup(io(false), { login });
+    expect((await loadConfig()).appPassword).toBe('env-pw');
+  });
+
+  it('a newly entered password that is rejected fails with AUTH; missing credentials are USAGE', async () => {
+    await freshConfigDir();
+    process.env.ATPSYNC_HANDLE = 'me.test';
+    process.env.ATPSYNC_APP_PASSWORD = 'typo-pw';
+    process.env.ATPSYNC_VAULT_DIR = tmp;
+    await expect(runSetup(io(false), { login: async () => { throw rejected(); } })).rejects.toMatchObject({ code: 'AUTH' });
+    delete process.env.ATPSYNC_APP_PASSWORD;
+    await expect(runSetup(io(false), { login: async () => new FakePds() })).rejects.toMatchObject({ code: 'USAGE' });
+  });
+});
+
 describe('FsVaultAdapter walk', () => {
   it('does not descend into ignored directories', async () => {
     const dir = await fs.mkdtemp(path.join(tmp, 'walk-'));

@@ -6,7 +6,8 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { daemonStatePath } from './paths';
 
-export type ConnectionMode = 'subscribed' | 'reconnecting' | 'poll';
+/** 'auth-failed': sign-in was rejected; the daemon waits for `atpsync setup` to store a new app password. */
+export type ConnectionMode = 'subscribed' | 'reconnecting' | 'poll' | 'auth-failed';
 
 export interface DaemonState {
   pid: number;

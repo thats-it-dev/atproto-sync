@@ -1,5 +1,5 @@
 /**
- * Vault onboarding for the CLI/pi context (port of packages/obsidian/src/onboarding.ts,
+ * Vault onboarding for the CLI context (port of packages/obsidian/src/onboarding.ts,
  * minus the Obsidian plugin coupling). Operates on any PdsClient so it is
  * unit-testable with FakePds.
  */
@@ -12,7 +12,9 @@ import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '@atproto-sync
 import type { PdsClient } from '@atproto-sync/core/sync/pds';
 import { login as realLogin } from '@atproto-sync/core/atproto/pds-client';
 import { ensureVaultDir, expandVaultPath, loadConfig, saveConfig } from './config';
+import { AtpsyncError } from './errors';
 import { resolvePdsUrl } from './resolve-pds';
+import { isAuthError } from './session';
 
 export interface VaultInfo {
   rkey: string;
@@ -152,15 +154,45 @@ export async function runSetup(io: SetupIO, deps: SetupDeps = defaultDeps): Prom
       (await ask('App password for that handle (create one in your PDS app-password settings)', 'ATPSYNC_APP_PASSWORD', true)) ?? '';
   }
   if (!identifier || !appPassword) {
-    io.notify('ATProto Sync setup: need both a handle and an app password (UI prompts or ATPSYNC_HANDLE / ATPSYNC_APP_PASSWORD).', 'error');
-    return;
+    throw new AtpsyncError(
+      'USAGE',
+      'setup needs both a handle and an app password (answer the prompts, or set ATPSYNC_HANDLE / ATPSYNC_APP_PASSWORD when headless).'
+    );
   }
+  const passwordWasStored = appPassword === cfg.appPassword;
 
   const vaultDir = await chooseVaultDir(io, cfg.vaultDir);
   await ensureVaultDir(vaultDir);
 
   io.notify('ATProto Sync: signing in…', 'info');
-  const pds = await deps.login(identifier, appPassword, cfg.pdsUrlOverride);
+  const authError = (err: unknown) =>
+    new AtpsyncError(
+      'AUTH',
+      `Sign-in failed for ${identifier} (${(err as Error).message}). Check the handle and app password, then run \`atpsync setup\` again.`
+    );
+  let pds: PdsClient;
+  try {
+    pds = await deps.login(identifier, appPassword, cfg.pdsUrlOverride);
+  } catch (err) {
+    if (!isAuthError(err)) throw err;
+    if (!passwordWasStored) throw authError(err);
+    // The saved app password was revoked or rotated: ask for the new one and retry once.
+    let next: string | undefined;
+    if (io.hasUI) {
+      io.notify('The saved app password was rejected.', 'warning');
+      next = (await io.input('New app password for that handle', undefined, { secret: true }))?.trim();
+    } else {
+      const env = process.env.ATPSYNC_APP_PASSWORD?.trim();
+      next = env && env !== appPassword ? env : undefined;
+    }
+    if (!next) throw authError(err);
+    appPassword = next;
+    try {
+      pds = await deps.login(identifier, appPassword, cfg.pdsUrlOverride);
+    } catch (err2) {
+      throw isAuthError(err2) ? authError(err2) : err2;
+    }
+  }
 
   const vaults = await listVaults(pds);
   const defaultName = path.basename(vaultDir);

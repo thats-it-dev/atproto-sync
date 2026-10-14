@@ -12,6 +12,8 @@ import { readDaemonState } from '../src/daemon-state';
 import { pidPath, stateDir } from '../src/paths';
 import { runSync } from '../src/session';
 import { createFileLogger } from '../src/logger';
+import { AtpsyncError } from '../src/errors';
+import { sleep } from './helpers';
 import { clearAtpsyncEnv, configuredCfg, tempEnv, waitFor } from './helpers';
 
 afterEach(clearAtpsyncEnv);
@@ -144,5 +146,38 @@ describe('runDaemon', () => {
     signals.emit('SIGTERM', 'SIGTERM');
     await done;
     await new Promise<void>((r) => wss.close(() => r()));
+  });
+
+  it('after a rejected sign-in, never logs in again until the app password changes', async () => {
+    const { vaultDir } = await tempEnv();
+    let cfg = await configuredCfg(vaultDir, { remote: 'subscribe' });
+    await saveConfig(cfg);
+    const passwords: string[] = [];
+    const { deps, signals, logs } = harness(cfg, async (c) => {
+      passwords.push(c.appPassword);
+      throw new AtpsyncError('AUTH', 'Sign-in failed for me.test (Invalid identifier or password).');
+    });
+    deps.loadConfig = async () => cfg;
+    deps.pollMs = 30;
+
+    const done = runDaemon(deps);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.connection === 'auth-failed');
+    for (let i = 0; i < 3; i++) {
+      await fs.writeFile(path.join(vaultDir, `n${i}.md`), String(i));
+      await sleep(80);
+    }
+    await sleep(200); // several polls and event-stream reconnect attempts
+    expect(passwords).toEqual(['app-pw-SECRET']);
+    expect(logs.filter((l) => l.includes('sign-in rejected')).length).toBe(1);
+    expect((await readDaemonState(vaultDir))?.lastError).toMatch(/Sign-in failed/);
+
+    cfg = { ...cfg, appPassword: 'new-app-pw' };
+    await fs.writeFile(path.join(vaultDir, 'after.md'), 'x');
+    await waitFor(() => passwords.includes('new-app-pw'));
+    expect(passwords.filter((p) => p === 'app-pw-SECRET')).toHaveLength(1);
+    expect(logs.some((l) => l.includes('app password changed'))).toBe(true);
+
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
   });
 });

@@ -3,7 +3,8 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { FakePds } from '@atproto-sync/core/sync/fake-pds';
 import { DEFAULT_CONFIG, loadConfig, saveConfig, configPath } from '../src/config';
-import { clearConnectionCache, connect, getVaultStatus, runSync } from '../src/session';
+import { AtpsyncError } from '../src/errors';
+import { clearConnectionCache, connect, getVaultStatus, runSync, withAuthRetry } from '../src/session';
 import { clearAtpsyncEnv, configuredCfg, tempEnv } from './helpers';
 
 afterEach(() => {
@@ -51,6 +52,52 @@ describe('connect', () => {
     });
     expect(c).toMatchObject({ did: 'did:plc:me', pdsUrl: 'http://pds.test' });
     expect(resolved).toBe(0);
+  });
+
+  it('caches the session, but signs in afresh once the app password changes', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir, { pdsUrlOverride: 'http://pds.test' });
+    const passwords: string[] = [];
+    const login = async (opts: { password: string }) => {
+      passwords.push(opts.password);
+      return Object.assign(new FakePds(), { did: 'did:plc:me' }) as never;
+    };
+    const a = await connect(cfg, { login });
+    expect(await connect(cfg, { login })).toBe(a);
+    const b = await connect({ ...cfg, appPassword: 'rotated-pw' }, { login });
+    expect(b).not.toBe(a);
+    expect(passwords).toEqual(['app-pw-SECRET', 'rotated-pw']);
+  });
+
+  it('withAuthRetry drops a dead cached session and retries once on a 401', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir, { pdsUrlOverride: 'http://pds.test' });
+    let logins = 0;
+    const login = async () => {
+      logins++;
+      return Object.assign(new FakePds(), { did: 'did:plc:me' }) as never;
+    };
+    await connect(cfg, { login });
+    const expired = Object.assign(new Error('Token has expired'), { status: 400, error: 'ExpiredToken' });
+    const seen: number[] = [];
+    const r = await withAuthRetry(async (n) => {
+      seen.push(n);
+      await connect(cfg, { login });
+      if (n === 0) throw expired;
+      return 'ok';
+    });
+    expect(r).toBe('ok');
+    expect(seen).toEqual([0, 1]);
+    expect(logins).toBe(2);
+    // A rejected fresh sign-in is definitive: no second attempt.
+    let calls = 0;
+    await expect(
+      withAuthRetry(async () => {
+        calls++;
+        throw new AtpsyncError('AUTH', 'Sign-in failed');
+      })
+    ).rejects.toMatchObject({ code: 'AUTH' });
+    expect(calls).toBe(1);
   });
 
   it('resolves the PDS URL from the handle when there is no override', async () => {

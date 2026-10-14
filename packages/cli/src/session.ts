@@ -2,6 +2,7 @@
  * Session wiring: build the PDS client and the SyncEngine from a config, and
  * run one sync pass. No Obsidian, no UI. Reuses the plugin's pure core.
  */
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { RealPdsClient, login } from '@atproto-sync/core/atproto/pds-client';
@@ -45,9 +46,33 @@ export function isAuthFailure(err: unknown): boolean {
   return Number(e?.status) === 401 || e?.error === 'AuthenticationRequired' || e?.error === 'ExpiredToken';
 }
 
-/** App-password login (cached per identifier + PDS override). */
+/** A raw PDS auth failure, or a sign-in already mapped to AtpsyncError('AUTH'). */
+export function isAuthError(err: unknown): boolean {
+  return isAuthFailure(err) || (err instanceof AtpsyncError && err.code === 'AUTH');
+}
+
+export const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
+
+/**
+ * Run `fn`; if a PDS call fails with an auth failure (401 / expired token),
+ * drop the cached session and try once more with a fresh login. A long-lived
+ * process such as the MCP server may hold a dead session. A fresh login that
+ * fails (AtpsyncError 'AUTH') is definitive and not retried; a rotated app
+ * password changes the cache key, so it never reuses the old session.
+ */
+export async function withAuthRetry<T>(fn: (attempt: number) => Promise<T>): Promise<T> {
+  try {
+    return await fn(0);
+  } catch (err) {
+    if (!isAuthFailure(err)) throw err;
+    clearConnectionCache();
+    return fn(1);
+  }
+}
+
+/** App-password login (cached per identifier + PDS override + app password). */
 export async function connect(cfg: AtpsyncConfig, deps: ConnectDeps = {}): Promise<Connection> {
-  const key = `${cfg.identifier}|${cfg.pdsUrlOverride || ''}`;
+  const key = `${cfg.identifier}|${cfg.pdsUrlOverride || ''}|${sha256(cfg.appPassword)}`;
   if (connCache && connCache.key === key) return connCache.conn;
   const pdsUrl = cfg.pdsUrlOverride || (await (deps.resolvePdsUrl ?? resolvePdsUrl)(cfg.identifier)).pdsUrl;
   let client: RealPdsClient;
@@ -137,15 +162,15 @@ export interface ToggleResult {
   summary: SyncSummary | null;
 }
 
-/** Flip a note's public flag in its frontmatter, then sync. */
-export async function togglePublic(
+/** Flip a note's public flag in its frontmatter (no sync). */
+export async function flipPublicFlag(
   cfg: AtpsyncConfig,
   relPath: string,
   makePublic: boolean,
   slug?: string,
-  hooks: SyncHooks = {}
-): Promise<ToggleResult> {
-  const vaultDir = boundVaultDir(cfg, hooks.vaultDir);
+  vaultDirOverride?: string
+): Promise<{ changed: boolean; message: string }> {
+  const vaultDir = boundVaultDir(cfg, vaultDirOverride);
   if (!isMarkdownPath(relPath)) {
     throw new Error(`"${relPath}" is not a markdown note; only .md files can be published.`);
   }
@@ -158,15 +183,27 @@ export async function togglePublic(
   }
   const publicNow = isPublicNote(content);
   if (makePublic === publicNow) {
-    return { changed: false, message: `No change: "${relPath}" is already ${publicNow ? 'public' : 'private'}.`, summary: null };
+    return { changed: false, message: `No change: "${relPath}" is already ${publicNow ? 'public' : 'private'}.` };
   }
   const next = makePublic ? setPublicFlag(content, slug) : removePublicFlag(content);
   await fs.writeFile(abs, next, 'utf8');
-  const summary = await runSync(cfg, hooks);
   const message = makePublic
     ? `"${relPath}" is now public${slug ? ` at /${slug}` : ''} (plaintext record, embedded attachments cascade to public).`
     : `"${relPath}" is now private again (record re-encrypted, key rotated).`;
-  return { changed: true, message, summary };
+  return { changed: true, message };
+}
+
+/** Flip a note's public flag in its frontmatter, then sync. */
+export async function togglePublic(
+  cfg: AtpsyncConfig,
+  relPath: string,
+  makePublic: boolean,
+  slug?: string,
+  hooks: SyncHooks = {}
+): Promise<ToggleResult> {
+  const flip = await flipPublicFlag(cfg, relPath, makePublic, slug, hooks.vaultDir);
+  if (!flip.changed) return { ...flip, summary: null };
+  return { ...flip, summary: await runSync(cfg, hooks) };
 }
 
 export interface VaultStatus {
@@ -198,12 +235,15 @@ export async function getVaultStatus(cfg: AtpsyncConfig, connectFn: Connect = co
     lastSyncAt: cfg.lastSyncAt ?? null,
   };
   try {
-    const { pds, pdsUrl } = await connectFn(cfg);
-    const [notes, atts, vaultRec] = await Promise.all([
-      pds.listRecords(NOTE_COLLECTION),
-      pds.listRecords(ATTACHMENT_COLLECTION),
-      pds.getRecord(VAULT_COLLECTION, cfg.vaultRkey),
-    ]);
+    const { pdsUrl, notes, atts, vaultRec } = await withAuthRetry(async () => {
+      const c = await connectFn(cfg);
+      const [notes, atts, vaultRec] = await Promise.all([
+        c.pds.listRecords(NOTE_COLLECTION),
+        c.pds.listRecords(ATTACHMENT_COLLECTION),
+        c.pds.getRecord(VAULT_COLLECTION, cfg.vaultRkey),
+      ]);
+      return { pdsUrl: c.pdsUrl, notes, atts, vaultRec };
+    });
     const mine = (r: { value: unknown }) => (r.value as { vault?: string }).vault === cfg.vaultRkey;
     status.pdsUrl = pdsUrl;
     status.remote = { notes: notes.filter(mine).length, attachments: atts.filter(mine).length };

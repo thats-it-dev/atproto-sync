@@ -84,6 +84,28 @@ describe('commands', () => {
     expect(text).toContain('remote: unavailable (offline)');
   });
 
+  it('sync and status retry once with a fresh session after a 401 from the PDS', async () => {
+    const { vaultDir, cfg } = await setup();
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'hello');
+    const pds = new FakePds();
+    const dead = new FakePds();
+    const expired = Object.assign(new Error('Token has expired'), { status: 401, error: 'ExpiredToken' });
+    dead.listRecords = async () => {
+      throw expired;
+    };
+    let connects = 0;
+    const deps: CommandDeps = {
+      ...depsFor(cfg, pds),
+      connect: async () => ({ pds: connects++ === 0 ? dead : pds, did: 'did:plc:me', pdsUrl: 'http://fake' }),
+    };
+    expect((await syncCommand(deps)).ok).toBe(true);
+    expect(connects).toBe(2);
+    connects = 0;
+    const st = await statusCommand(deps);
+    expect(st.remote).toEqual({ notes: 1, attachments: 0 });
+    expect(connects).toBe(2);
+  });
+
   it('never exposes the app password or master key', async () => {
     const { cfg } = await setup();
     const r = await statusCommand(depsFor(cfg));
