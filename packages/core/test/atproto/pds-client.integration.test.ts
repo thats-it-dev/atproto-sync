@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { login } from '../../src/obsidian/pds-client';
+import { login } from '../../src/atproto/pds-client';
 import { CasError } from '../../src/sync/pds';
 
 /**
@@ -7,7 +7,7 @@ import { CasError } from '../../src/sync/pds';
  *
  *   docker run -d -p 3000:3000 -e PDS_DEV_MODE=true ... ghcr.io/bluesky-social/pds
  *   NOTESKY_PDS_URL=http://localhost:3000 \
- *   NOTESKY_HANDLE=test.example NOTESKY_PASSWORD=... npx vitest run tests/obsidian/pds-client.integration.test.ts
+ *   NOTESKY_HANDLE=test.example NOTESKY_PASSWORD=... npx vitest run test/atproto/pds-client.integration.test.ts
  */
 const url = process.env.NOTESKY_PDS_URL;
 const handle = process.env.NOTESKY_HANDLE;

@@ -4,7 +4,7 @@ import {
   NOTE_COLLECTION,
   TOMBSTONE_COLLECTION,
 } from '../../src/lexicon/build';
-import { login } from '../../src/obsidian/pds-client';
+import { login } from '../../src/atproto/pds-client';
 import { makeEngine } from './helpers';
 
 /**

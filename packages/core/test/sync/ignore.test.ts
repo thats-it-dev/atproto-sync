@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isIgnored } from '../../src/obsidian/ignore';
+import { isIgnored } from '../../src/sync/ignore';
 
 describe('isIgnored', () => {
   it('matches exact paths and folder prefixes', () => {

@@ -1,49 +1,19 @@
 {
   "name": "atproto-sync",
   "version": "0.1.0",
+  "private": true,
   "description": "Sync your Obsidian vault to your ATProto PDS, E2E-encrypted, with per-note publishing.",
-  "main": "main.js",
-  "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "build": "node esbuild.config.mjs production",
-    "dev": "node esbuild.config.mjs"
-  },
-  "keywords": [
-    "obsidian",
-    "atproto",
-    "pi-package"
-  ],
-  "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm --filter @atproto-sync/obsidian build",
+    "dev": "pnpm --filter @atproto-sync/obsidian dev"
+  },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.0.2",
-    "@earendil-works/pi-ai": "1.0.2",
-    "@types/diff-match-patch": "^1.0.36",
-    "@types/libsodium-wrappers-sumo": "^0.7.8",
     "@types/node": "^26.2.0",
     "esbuild": "^0.28.2",
-    "fake-indexeddb": "^6.2.5",
-    "obsidian": "^1.13.1",
-    "tslib": "^2.8.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
-  },
-  "dependencies": {
-    "@atproto/api": "^0.20.41",
-    "@atproto/oauth-client": "^0.8.3",
-    "@atproto/oauth-client-browser": "^0.5.3",
-    "diff-match-patch": "^1.0.5",
-    "libsodium-wrappers-sumo": "^0.8.4"
-  },
-  "pi": {
-    "extensions": [
-      "./pi-extension/index.ts"
-    ]
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*"
   }
 }
