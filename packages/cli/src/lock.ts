@@ -85,10 +85,43 @@ export async function tryAcquireLock(vaultDir: string, opts: LockOptions = {}): 
   const lock = await tryCreate(file, heartbeatMs);
   if (lock) return lock;
   if (await isStale(file, opts.staleMs ?? 2 * 60_000)) {
-    await fs.rm(file, { force: true });
+    if (!(await breakStale(file))) return null;
     return tryCreate(file, heartbeatMs);
   }
   return null;
+}
+
+const sameHolder = (a: Holder | null, b: Holder | null): boolean =>
+  a === null || b === null
+    ? a === b
+    : a.pid === b.pid && a.host === b.host && a.startedAt === b.startedAt;
+
+/**
+ * Break a stale lock without racing other breakers: rename it aside (atomic, only one
+ * breaker wins), then verify what we moved is what we judged stale. If we moved someone
+ * else's fresh lock, hard-link it back (fails with EEXIST rather than clobbering).
+ * Returns true if the lock path is now free to create.
+ */
+async function breakStale(file: string): Promise<boolean> {
+  const judged = await readHolder(file);
+  const aside = `${file}.stale-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  try {
+    await fs.rename(file, aside);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true; // someone else broke it first
+    throw err;
+  }
+  if (!sameHolder(judged, await readHolder(aside))) {
+    try {
+      await fs.link(aside, file);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+    await fs.rm(aside, { force: true });
+    return false;
+  }
+  await fs.rm(aside, { force: true });
+  return true;
 }
 
 export async function acquireLock(vaultDir: string, opts: LockOptions = {}): Promise<VaultLock> {

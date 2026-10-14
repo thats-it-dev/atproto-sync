@@ -85,4 +85,14 @@ describe('vault lock', () => {
     await a.release();
     await expect(fs.access(lockPath(vaultDir))).resolves.toBeUndefined();
   });
+
+  it('concurrent breakers of one stale lock yield exactly one holder', async () => {
+    const { vaultDir } = await tempEnv();
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    await writeLock(vaultDir, { pid: dead, host: os.hostname(), startedAt: 'x' });
+    const results = await Promise.all(Array.from({ length: 5 }, () => tryAcquireLock(vaultDir)));
+    const held = results.filter((r) => r !== null);
+    expect(held).toHaveLength(1);
+    await held[0]!.release();
+  });
 });
