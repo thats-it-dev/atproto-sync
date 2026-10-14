@@ -52,7 +52,7 @@ describe('vault directory binding', () => {
   it('runSync refuses when no vault dir is bound', async () => {
     await freshConfigDir();
     const cfg = await configuredCfg('');
-    await expect(runSync(cfg, '/some/cwd', { pds: new FakePds() })).rejects.toThrow(/ATPSYNC_VAULT_DIR|setup/);
+    await expect(runSync(cfg, { pds: new FakePds() })).rejects.toThrow(/ATPSYNC_VAULT_DIR|setup/);
   });
 
   it('default ignores include node_modules', () => {
@@ -67,7 +67,7 @@ describe('runSync', () => {
     const cfg = await configuredCfg(dir);
     await saveConfig(cfg);
     await fs.writeFile(path.join(dir, 'a.md'), 'x');
-    const summary = await runSync(cfg, '/elsewhere', { pds: new FakePds() });
+    const summary = await runSync(cfg, { pds: new FakePds() });
     expect(summary.vaultDir).toBe(dir);
     const saved = await loadConfig();
     expect(saved.lastSyncAt).toBe(summary.lastSyncAt);
@@ -79,7 +79,7 @@ describe('togglePublic', () => {
     await freshConfigDir();
     const dir = await fs.mkdtemp(path.join(tmp, 'tp-'));
     const cfg = await configuredCfg(dir);
-    await expect(togglePublic(cfg, '/cwd', '../outside.md', true, undefined, { pds: new FakePds() })).rejects.toThrow(/Unsafe/);
+    await expect(togglePublic(cfg, '../outside.md', true, undefined, { pds: new FakePds() })).rejects.toThrow(/Unsafe/);
   });
 
   it('rejects non-markdown paths', async () => {
@@ -87,7 +87,7 @@ describe('togglePublic', () => {
     const dir = await fs.mkdtemp(path.join(tmp, 'tp2-'));
     const cfg = await configuredCfg(dir);
     await fs.writeFile(path.join(dir, 'pic.png'), 'x');
-    await expect(togglePublic(cfg, '/cwd', 'pic.png', true, undefined, { pds: new FakePds() })).rejects.toThrow(/markdown/i);
+    await expect(togglePublic(cfg, 'pic.png', true, undefined, { pds: new FakePds() })).rejects.toThrow(/markdown/i);
   });
 
   it('publishes a note and syncs it as plaintext', async () => {
@@ -96,8 +96,9 @@ describe('togglePublic', () => {
     const cfg = await configuredCfg(dir);
     await fs.writeFile(path.join(dir, 'post.md'), 'hello world');
     const pds = new FakePds();
-    const msg = await togglePublic(cfg, '/cwd', 'post.md', true, 'hello', { pds });
-    expect(msg).toMatch(/now public/);
+    const r = await togglePublic(cfg, 'post.md', true, 'hello', { pds });
+    expect(r.changed).toBe(true);
+    expect(r.message).toMatch(/now public/);
     expect(JSON.stringify(await pds.listRecords('app.notesky.note'))).toContain('hello world');
   });
 });

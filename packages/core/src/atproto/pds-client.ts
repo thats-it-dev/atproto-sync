@@ -28,7 +28,7 @@ function mapPdsError(err: unknown): unknown {
 export class RealPdsClient implements PdsClient {
   constructor(
     private readonly agent: Agent,
-    private readonly did: string
+    readonly did: string
   ) {}
 
   async putRecord(

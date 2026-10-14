@@ -18,30 +18,53 @@ import { SyncEngine } from '@atproto-sync/core/sync/engine';
 import { FsVaultAdapter, isMarkdownPath, resolveInsideVault } from './fs-vault';
 import { FsIndexStore } from './fs-store';
 import { resolvePdsUrl } from './resolve-pds';
+import { AtpsyncError } from './errors';
 import { boundVaultDir, isConfigured, loadConfig, saveConfig, type AtpsyncConfig } from './config';
 
-let pdsCache: { key: string; pds: RealPdsClient } | null = null;
+export interface Connection {
+  pds: PdsClient;
+  did: string;
+  pdsUrl: string;
+}
+export type Connect = (cfg: AtpsyncConfig) => Promise<Connection>;
 
-/** Drop the cached PDS client (after logout / config change). */
-export function clearPdsCache(): void {
-  pdsCache = null;
+export interface ConnectDeps {
+  login?: typeof login;
+  resolvePdsUrl?: typeof resolvePdsUrl;
 }
 
-/** App-password login (cached per identifier+service). */
-export function makePdsClient(cfg: AtpsyncConfig): Promise<RealPdsClient> {
+let connCache: { key: string; conn: Connection } | null = null;
+
+/** Drop the cached session (after logout, setup, or an auth failure). */
+export function clearConnectionCache(): void {
+  connCache = null;
+}
+
+export function isAuthFailure(err: unknown): boolean {
+  const e = err as { status?: unknown; error?: unknown } | null;
+  return Number(e?.status) === 401 || e?.error === 'AuthenticationRequired' || e?.error === 'ExpiredToken';
+}
+
+/** App-password login (cached per identifier + PDS override). */
+export async function connect(cfg: AtpsyncConfig, deps: ConnectDeps = {}): Promise<Connection> {
   const key = `${cfg.identifier}|${cfg.pdsUrlOverride || ''}`;
-  if (pdsCache && pdsCache.key === key) return Promise.resolve(pdsCache.pds);
-  return login(
-    {
-      identifier: cfg.identifier,
-      password: cfg.appPassword,
-      pdsUrl: cfg.pdsUrlOverride || undefined,
-    },
-    resolvePdsUrl
-  ).then((pds) => {
-    pdsCache = { key, pds };
-    return pds;
-  });
+  if (connCache && connCache.key === key) return connCache.conn;
+  const pdsUrl = cfg.pdsUrlOverride || (await (deps.resolvePdsUrl ?? resolvePdsUrl)(cfg.identifier)).pdsUrl;
+  let client: RealPdsClient;
+  try {
+    client = await (deps.login ?? login)({ identifier: cfg.identifier, password: cfg.appPassword, pdsUrl });
+  } catch (err) {
+    if (isAuthFailure(err)) {
+      throw new AtpsyncError(
+        'AUTH',
+        `Sign-in failed for ${cfg.identifier} (${(err as Error).message}). Check the app password or run \`atpsync setup\`.`
+      );
+    }
+    throw err;
+  }
+  const conn: Connection = { pds: client, did: client.did, pdsUrl };
+  connCache = { key, conn };
+  return conn;
 }
 
 export interface SyncSummary {
@@ -67,16 +90,13 @@ export interface SyncHooks {
 /** Run one full sync (notes + attachments, including the CAS-retry pass). */
 export async function runSync(
   cfg: AtpsyncConfig,
-  _cwd: string,
   hooks: SyncHooks = {}
 ): Promise<SyncSummary> {
   if (!isConfigured(cfg)) {
-    throw new Error(
-      'Not configured yet. Run /atpsync setup first (handle, app password, passphrase).'
-    );
+    throw new AtpsyncError('NOT_CONFIGURED', 'Not configured yet. Run `atpsync setup` first (handle, app password, passphrase).');
   }
   const vaultDir = boundVaultDir(cfg, hooks.vaultDir);
-  const pds = hooks.pds ?? (await makePdsClient(cfg));
+  const pds = hooks.pds ?? (await connect(cfg)).pds;
   const masterKey = await fromB64(cfg.masterKeyB64);
 
   const warnings: string[] = [];
@@ -111,15 +131,20 @@ export async function runSync(
   };
 }
 
-/** Flip a note's public flag in its frontmatter, then sync. Returns a human summary. */
+export interface ToggleResult {
+  changed: boolean;
+  message: string;
+  summary: SyncSummary | null;
+}
+
+/** Flip a note's public flag in its frontmatter, then sync. */
 export async function togglePublic(
   cfg: AtpsyncConfig,
-  cwd: string,
   relPath: string,
   makePublic: boolean,
   slug?: string,
   hooks: SyncHooks = {}
-): Promise<string> {
+): Promise<ToggleResult> {
   const vaultDir = boundVaultDir(cfg, hooks.vaultDir);
   if (!isMarkdownPath(relPath)) {
     throw new Error(`"${relPath}" is not a markdown note; only .md files can be published.`);
@@ -133,15 +158,15 @@ export async function togglePublic(
   }
   const publicNow = isPublicNote(content);
   if (makePublic === publicNow) {
-    return `No change: "${relPath}" is already ${publicNow ? 'public' : 'private'}.`;
+    return { changed: false, message: `No change: "${relPath}" is already ${publicNow ? 'public' : 'private'}.`, summary: null };
   }
   const next = makePublic ? setPublicFlag(content, slug) : removePublicFlag(content);
   await fs.writeFile(abs, next, 'utf8');
-  const summary = await runSync(cfg, cwd, hooks);
-  const msg = makePublic
+  const summary = await runSync(cfg, hooks);
+  const message = makePublic
     ? `"${relPath}" is now public${slug ? ` at /${slug}` : ''} (plaintext record, embedded attachments cascade to public).`
     : `"${relPath}" is now private again (record re-encrypted, key rotated).`;
-  return [msg, formatSummary(summary)].join('\n');
+  return { changed: true, message, summary };
 }
 
 export function formatSummary(summary: {
@@ -163,53 +188,45 @@ export function formatSummary(summary: {
 
 export interface VaultStatus {
   identifier: string;
-  pdsUrl: string;
   vaultRkey: string;
-  vaultName: string | null;
   vaultDir: string;
+  vaultName: string | null;
+  pdsUrl: string | null;
   localNotes: number;
-  remoteNotes: number;
-  remoteAttachments: number;
-  lastSyncAt?: string;
+  /** null when the PDS could not be reached (see remoteError). */
+  remote: { notes: number; attachments: number } | null;
+  remoteError: string | null;
+  lastSyncAt: string | null;
 }
 
-/** Read-only snapshot of the account/vault state (logs in to count records). */
-export async function getVaultStatus(
-  cfg: AtpsyncConfig,
-  _cwd: string
-): Promise<VaultStatus> {
+/** Snapshot of the account/vault state. Local counts always; remote counts when reachable. */
+export async function getVaultStatus(cfg: AtpsyncConfig, connectFn: Connect = connect): Promise<VaultStatus> {
   const vaultDir = boundVaultDir(cfg);
-  const vault = new FsVaultAdapter(vaultDir, () => cfg.ignorePatterns);
-  const localNotes = await vault.countMarkdown();
-
-  let vaultName: string | null = null;
-  let remoteNotes = 0;
-  let remoteAttachments = 0;
-  if (isConfigured(cfg)) {
-    const pds = await makePdsClient(cfg);
+  const localNotes = await new FsVaultAdapter(vaultDir, () => cfg.ignorePatterns).countMarkdown();
+  const status: VaultStatus = {
+    identifier: cfg.identifier,
+    vaultRkey: cfg.vaultRkey,
+    vaultDir,
+    vaultName: null,
+    pdsUrl: cfg.pdsUrlOverride || null,
+    localNotes,
+    remote: null,
+    remoteError: null,
+    lastSyncAt: cfg.lastSyncAt ?? null,
+  };
+  try {
+    const { pds, pdsUrl } = await connectFn(cfg);
     const [notes, atts, vaultRec] = await Promise.all([
       pds.listRecords(NOTE_COLLECTION),
       pds.listRecords(ATTACHMENT_COLLECTION),
       pds.getRecord(VAULT_COLLECTION, cfg.vaultRkey),
     ]);
-    remoteNotes = notes.filter(
-      (r) => (r.value as { vault?: string }).vault === cfg.vaultRkey
-    ).length;
-    remoteAttachments = atts.filter(
-      (r) => (r.value as { vault?: string }).vault === cfg.vaultRkey
-    ).length;
-    if (vaultRec) vaultName = (vaultRec.value as VaultRecord).name ?? null;
+    const mine = (r: { value: unknown }) => (r.value as { vault?: string }).vault === cfg.vaultRkey;
+    status.pdsUrl = pdsUrl;
+    status.remote = { notes: notes.filter(mine).length, attachments: atts.filter(mine).length };
+    if (vaultRec) status.vaultName = (vaultRec.value as VaultRecord).name ?? null;
+  } catch (err) {
+    status.remoteError = (err as Error).message;
   }
-
-  return {
-    identifier: cfg.identifier,
-    pdsUrl: cfg.pdsUrlOverride || '(resolved from handle)',
-    vaultRkey: cfg.vaultRkey,
-    vaultName,
-    vaultDir,
-    localNotes,
-    remoteNotes,
-    remoteAttachments,
-    lastSyncAt: cfg.lastSyncAt,
-  };
+  return status;
 }

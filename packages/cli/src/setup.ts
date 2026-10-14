@@ -94,7 +94,7 @@ export interface SetupIO {
   /** Working directory; relative vault paths resolve against it and it is the first-run prompt default. */
   cwd: string;
   hasUI: boolean;
-  /** Vault folder given on the command line (`/atpsync setup <dir>`). */
+  /** Vault folder given on the command line (`atpsync setup <dir>`). */
   vaultDir?: string;
   input(title: string, placeholder?: string): Promise<string | undefined>;
   select(title: string, options: string[]): Promise<string | undefined>;
@@ -130,7 +130,7 @@ async function chooseVaultDir(io: SetupIO, savedDir: string): Promise<string> {
     return expandVaultPath(answer.trim() || fallback, io.cwd);
   }
   if (savedDir) return savedDir;
-  throw new Error('setup needs a vault folder: run /atpsync setup <dir>, or set ATPSYNC_VAULT_DIR when headless.');
+  throw new Error('setup needs a vault folder: run `atpsync setup <dir>`, or set ATPSYNC_VAULT_DIR when headless.');
 }
 
 export async function runSetup(io: SetupIO, deps: SetupDeps = defaultDeps): Promise<void> {
@@ -213,7 +213,7 @@ export async function runSetup(io: SetupIO, deps: SetupDeps = defaultDeps): Prom
 
   await saveConfig({ ...cfg, identifier, appPassword, vaultRkey, masterKeyB64, vaultDir });
   io.notify(
-    `ATProto Sync: signed in as ${identifier}, bound "${vaultDir}" to vault "${vaultRkey}". Run /atpsync sync to start.`,
+    `ATProto Sync: signed in as ${identifier}, bound "${vaultDir}" to vault "${vaultRkey}". Run \`atpsync start\` to sync in the background.`,
     'info'
   );
 }

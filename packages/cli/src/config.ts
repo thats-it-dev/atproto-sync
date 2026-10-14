@@ -8,6 +8,7 @@
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { AtpsyncError } from './errors';
 
 export interface AtpsyncConfig {
   /** ATProto handle, e.g. you.bsky.social */
@@ -106,9 +107,7 @@ export async function ensureVaultDir(dir: string): Promise<void> {
 export function boundVaultDir(cfg: AtpsyncConfig, explicit?: string): string {
   const dir = explicit || process.env.ATPSYNC_VAULT_DIR || cfg.vaultDir;
   if (!dir) {
-    throw new Error(
-      'No vault directory is bound. Run /atpsync setup [folder], or set ATPSYNC_VAULT_DIR.'
-    );
+    throw new AtpsyncError('NOT_CONFIGURED', 'No vault directory is bound. Run `atpsync setup [folder]`, or set ATPSYNC_VAULT_DIR.');
   }
   return path.resolve(dir);
 }
