@@ -49,6 +49,14 @@ End-to-end encrypted by default.
   local-only; they're listed under Settings → Skipped files.
 - `.obsidian/` configuration does not sync.
 
+## Command-line sync (without Obsidian)
+
+[`packages/cli`](packages/cli/README.md) provides `atpsync`, a CLI and background daemon that
+keeps a plain vault folder in sync using the same engine, encryption and record layout as the
+plugin. It reacts to remote changes in real time through your PDS's event stream, and works
+with any editor or coding agent (CLI with `--json`, or `atpsync mcp`). App-password auth;
+config in `~/.config/atpsync/`.
+
 ## Development
 
 ```bash
