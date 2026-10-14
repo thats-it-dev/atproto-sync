@@ -169,23 +169,6 @@ export async function togglePublic(
   return { changed: true, message, summary };
 }
 
-export function formatSummary(summary: {
-  opsExecuted: number;
-  warnings: string[];
-  skippedPaths: string[];
-  lastSyncAt: string;
-}): string {
-  const lines = [`Sync complete: ${summary.opsExecuted} operation(s) at ${summary.lastSyncAt}.`];
-  if (summary.warnings.length) {
-    lines.push('Warnings:');
-    for (const w of summary.warnings) lines.push(`  - ${w}`);
-  }
-  if (summary.skippedPaths.length) {
-    lines.push(`Skipped (too large for PDS): ${summary.skippedPaths.join(', ')}`);
-  }
-  return lines.join('\n');
-}
-
 export interface VaultStatus {
   identifier: string;
   vaultRkey: string;
