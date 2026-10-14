@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": { "atpsync": "dist/atpsync.cjs" },
   "scripts": {
+    "build": "node build.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p ."
   },

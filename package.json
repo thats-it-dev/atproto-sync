@@ -8,6 +8,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm --filter @atproto-sync/obsidian build",
+    "build:cli": "pnpm --filter @atproto-sync/cli build",
     "dev": "pnpm --filter @atproto-sync/obsidian dev"
   },
   "devDependencies": {

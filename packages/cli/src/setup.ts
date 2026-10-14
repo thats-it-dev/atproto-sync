@@ -89,14 +89,14 @@ export async function unlockVault(
   return { masterKeyB64: await toB64(master), vaultName: rec.name };
 }
 
-/** The slice of pi's ExtensionContext that setup needs (so it can run against fakes). */
+/** The interactive surface setup needs (TTY prompts in the CLI, fakes in tests). */
 export interface SetupIO {
   /** Working directory; relative vault paths resolve against it and it is the first-run prompt default. */
   cwd: string;
   hasUI: boolean;
   /** Vault folder given on the command line (`atpsync setup <dir>`). */
   vaultDir?: string;
-  input(title: string, placeholder?: string): Promise<string | undefined>;
+  input(title: string, placeholder?: string, opts?: { secret?: boolean }): Promise<string | undefined>;
   select(title: string, options: string[]): Promise<string | undefined>;
   notify(message: string, type?: 'info' | 'warning' | 'error'): void;
 }
@@ -136,12 +136,12 @@ async function chooseVaultDir(io: SetupIO, savedDir: string): Promise<string> {
 export async function runSetup(io: SetupIO, deps: SetupDeps = defaultDeps): Promise<void> {
   const cfg = await loadConfig();
 
-  const ask = (title: string, fallbackEnv?: string): Promise<string | undefined> => {
+  const ask = (title: string, fallbackEnv?: string, secret = false): Promise<string | undefined> => {
     if (!io.hasUI) {
       const v = fallbackEnv ? process.env[fallbackEnv] : undefined;
       return Promise.resolve(v?.trim() ? v.trim() : undefined);
     }
-    return io.input(title);
+    return io.input(title, undefined, { secret });
   };
 
   let identifier = cfg.identifier.trim();
@@ -149,7 +149,7 @@ export async function runSetup(io: SetupIO, deps: SetupDeps = defaultDeps): Prom
   let appPassword = cfg.appPassword;
   if (!appPassword) {
     appPassword =
-      (await ask('App password for that handle (create one in your PDS app-password settings)', 'ATPSYNC_APP_PASSWORD')) ?? '';
+      (await ask('App password for that handle (create one in your PDS app-password settings)', 'ATPSYNC_APP_PASSWORD', true)) ?? '';
   }
   if (!identifier || !appPassword) {
     io.notify('ATProto Sync setup: need both a handle and an app password (UI prompts or ATPSYNC_HANDLE / ATPSYNC_APP_PASSWORD).', 'error');
@@ -165,7 +165,7 @@ export async function runSetup(io: SetupIO, deps: SetupDeps = defaultDeps): Prom
   const vaults = await listVaults(pds);
   const defaultName = path.basename(vaultDir);
 
-  const askPassphrase = (title: string) => ask(title, 'ATPSYNC_PASSPHRASE');
+  const askPassphrase = (title: string) => ask(title, 'ATPSYNC_PASSPHRASE', true);
 
   let vaultRkey: string;
   let masterKeyB64: string;
