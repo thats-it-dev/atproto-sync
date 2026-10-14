@@ -21,6 +21,7 @@ export class SyncScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private armedDelay = Infinity;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollMs: number | null = null;
   private syncing = false;
   private pending: Trigger | null = null;
   private stopped = false;
@@ -45,7 +46,9 @@ export class SyncScheduler {
   }
 
   setPollInterval(ms: number): void {
+    if (this.pollTimer && this.pollMs === ms) return; // unchanged: don't reset the countdown
     if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollMs = this.stopped ? null : ms;
     this.pollTimer = this.stopped ? null : setInterval(() => this.trigger('poll'), ms);
   }
 
@@ -55,6 +58,7 @@ export class SyncScheduler {
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.timer = null;
     this.pollTimer = null;
+    this.pollMs = null;
     this.pending = null;
     await this.inflight;
   }

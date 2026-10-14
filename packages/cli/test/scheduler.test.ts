@@ -19,6 +19,18 @@ describe('SyncScheduler', () => {
     return { runs, run };
   }
 
+  it('keeps polling when setPollInterval is repeated with the same interval', async () => {
+    const { runs, run } = recorder();
+    const s = new SyncScheduler(run);
+    s.setPollInterval(1000);
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(600);
+      s.setPollInterval(1000);
+    }
+    expect(runs.filter((r) => r === 'poll').length).toBeGreaterThanOrEqual(1);
+    await s.stop();
+  });
+
   it('coalesces a burst of 50 fs events into one run after 2 s of quiet', async () => {
     const { runs, run } = recorder();
     const s = new SyncScheduler(run);

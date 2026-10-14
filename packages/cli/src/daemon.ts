@@ -77,7 +77,7 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
     try {
       const cfg = await deps.loadConfig();
       const { pds } = await deps.connect(cfg);
-      const s = await runSync(cfg, { pds });
+      const s = await runSync(cfg, { pds, vaultDir });
       log.info(`sync (${reason}): ${s.opsExecuted} operation(s)`);
       for (const w of s.warnings) log.warn(w);
       await state.update({ lastSyncAt: s.lastSyncAt, lastResult: 'ok', lastError: null });
