@@ -1,9 +1,10 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { AtpsyncError, EXIT_CODES, toAtpsyncError } from '../src/errors';
 import { pidPath, stateDir } from '../src/paths';
-import { isAlive, readLivePid, removePid, writePidExclusive } from '../src/pidfile';
+import { currentBootTime, isAlive, readLivePid, removePid, writePidExclusive } from '../src/pidfile';
+import { stopCommand } from '../src/commands/daemon-control';
 import { DaemonStateWriter, readDaemonState, type DaemonState } from '../src/daemon-state';
 import { clearAtpsyncEnv, tempEnv } from './helpers';
 
@@ -58,11 +59,79 @@ describe('pidfile', () => {
     await expect(writePidExclusive(process.pid)).rejects.toMatchObject({ code: 'ALREADY_RUNNING' });
   });
 
+  it('writes JSON with the boot time', async () => {
+    await tempEnv();
+    await writePidExclusive(process.pid);
+    const rec = JSON.parse(await fs.readFile(pidPath(), 'utf8'));
+    expect(rec).toMatchObject({ pid: process.pid, startedAt: expect.any(String) });
+    expect(Math.abs(rec.bootTime - currentBootTime())).toBeLessThan(5_000);
+    await expect(fs.readdir(stateDir())).resolves.toEqual(['daemon.pid']);
+  });
+
+  it('treats a pidfile from before a reboot as stale even if the pid is alive now', async () => {
+    await tempEnv();
+    await fs.mkdir(stateDir(), { recursive: true });
+    const rec = { pid: process.ppid, bootTime: currentBootTime() - 24 * 3600_000, startedAt: 'yesterday' };
+    await fs.writeFile(pidPath(), JSON.stringify(rec));
+    expect(isAlive(process.ppid)).toBe(true);
+    expect(await readLivePid()).toBeNull();
+    await expect(fs.access(pidPath())).rejects.toThrow();
+  });
+
+  it('accepts a legacy plain-number pidfile while that pid is alive; garbage is stale', async () => {
+    await tempEnv();
+    await fs.mkdir(stateDir(), { recursive: true });
+    await fs.writeFile(pidPath(), `${process.ppid}\n`);
+    expect(await readLivePid()).toBe(process.ppid);
+    await fs.writeFile(pidPath(), 'not a pid');
+    expect(await readLivePid()).toBeNull();
+    await expect(fs.access(pidPath())).rejects.toThrow();
+  });
+
   it('removePid leaves another process’s pidfile alone', async () => {
     await tempEnv();
     await writePidExclusive(process.ppid);
     await removePid(process.pid);
     expect(await readLivePid()).toBe(process.ppid);
+  });
+});
+
+describe('stopCommand signalling', () => {
+  // process.kill is mocked: signal 0 reports the pid alive, real signals behave as scripted.
+  async function liveLooking(onSignal: () => never) {
+    await tempEnv();
+    await writePidExclusive(process.ppid);
+    return vi.spyOn(process, 'kill').mockImplementation(((_pid: number, sig?: string | number) => {
+      if (sig === 0 || sig === undefined) return true;
+      return onSignal();
+    }) as typeof process.kill);
+  }
+  const errno = (code: string) => Object.assign(new Error(code), { code });
+
+  it('a daemon that exits just before SIGTERM counts as already stopped', async () => {
+    const kill = await liveLooking(() => {
+      throw errno('ESRCH');
+    });
+    try {
+      await expect(stopCommand({ graceMs: 100 })).resolves.toMatchObject({ ok: true, wasRunning: false });
+    } finally {
+      kill.mockRestore();
+    }
+    await expect(fs.access(pidPath())).rejects.toThrow();
+  });
+
+  it('refuses to signal another user’s process', async () => {
+    const kill = await liveLooking(() => {
+      throw errno('EPERM');
+    });
+    try {
+      await expect(stopCommand({ graceMs: 100 })).rejects.toMatchObject({
+        code: 'ERROR',
+        message: `pid ${process.ppid} belongs to another user; not stopping it`,
+      });
+    } finally {
+      kill.mockRestore();
+    }
   });
 });
 

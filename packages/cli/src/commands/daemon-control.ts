@@ -54,19 +54,35 @@ export async function startCommand(
   throw new AtpsyncError('ERROR', `The daemon failed to start${why}. Last log lines:\n${await tailLog(20)}`);
 }
 
+/** process.kill that reports "already gone" (ESRCH) as false and refuses other users' processes. */
+function signal(pid: number, sig: NodeJS.Signals): boolean {
+  try {
+    process.kill(pid, sig);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return false;
+    if (code === 'EPERM') throw new AtpsyncError('ERROR', `pid ${pid} belongs to another user; not stopping it`);
+    throw err;
+  }
+}
+
 /** SIGTERM the daemon, wait up to graceMs (default 10 s), then SIGKILL. */
 export async function stopCommand(
   opts: { graceMs?: number } = {}
 ): Promise<{ ok: true; wasRunning: boolean; pid: number | null; forced: boolean }> {
   const pid = await readLivePid();
   if (pid === null) return { ok: true, wasRunning: false, pid: null, forced: false };
-  process.kill(pid, 'SIGTERM');
+  if (!signal(pid, 'SIGTERM')) {
+    // Exited between the pidfile check and the signal.
+    await removePid(pid);
+    return { ok: true, wasRunning: false, pid: null, forced: false };
+  }
   const deadline = Date.now() + (opts.graceMs ?? 10_000);
   while (Date.now() < deadline && isAlive(pid)) await sleep(100);
   let forced = false;
-  if (isAlive(pid)) {
+  if (isAlive(pid) && signal(pid, 'SIGKILL')) {
     forced = true;
-    process.kill(pid, 'SIGKILL');
     for (let i = 0; i < 10 && isAlive(pid); i++) await sleep(100);
   }
   await removePid(pid);

@@ -64,7 +64,7 @@ describe('runDaemon', () => {
 
     const done = runDaemon(deps);
     await waitFor(async () => (await pds.listRecords('app.notesky.note')).length === 1);
-    expect((await fs.readFile(pidPath(), 'utf8')).trim()).toBe(String(process.pid));
+    expect(JSON.parse(await fs.readFile(pidPath(), 'utf8'))).toMatchObject({ pid: process.pid, bootTime: expect.any(Number) });
     await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
 
     await fs.writeFile(path.join(vaultDir, 'b.md'), 'second');
