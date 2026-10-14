@@ -1,7 +1,8 @@
 /** Argument parsing, dispatch, text vs --json output, and exit codes. */
 import { parseArgs } from 'node:util';
 import { defaultDeps, type CommandDeps } from './commands/context';
-import type { StartDeps } from './commands/daemon-control';
+import { startCommand, stopCommand, type StartDeps } from './commands/daemon-control';
+import { logsCommand } from './commands/logs';
 import { logoutCommand } from './commands/logout';
 import { publishCommand } from './commands/publish';
 import { statusCommand } from './commands/status';
@@ -109,8 +110,7 @@ export async function main(argv: string[], env: CliEnv = defaultEnv()): Promise<
         return 0;
       }
       case 'logout': {
-        // Task 9 replaces this stub with `() => stopCommand()`.
-        const r = await logoutCommand(deps, async () => ({ wasRunning: false }));
+        const r = await logoutCommand(deps, () => stopCommand());
         emit(r, `Logged out${r.stoppedDaemon ? ' (daemon stopped)' : ''}. Run \`atpsync setup\` to sign back in.`);
         return 0;
       }
@@ -130,7 +130,20 @@ export async function main(argv: string[], env: CliEnv = defaultEnv()): Promise<
         });
         return 0;
       }
-      // 'start' | 'stop' | 'logs' are added in Task 9; 'mcp' in Task 10.
+      case 'start': {
+        const r = await startCommand(deps, env.ctl);
+        emit(r, `atpsync daemon started (pid ${r.pid}). Logs: ${r.logPath}`);
+        return 0;
+      }
+      case 'stop': {
+        const r = await stopCommand();
+        emit(r, r.wasRunning ? `atpsync daemon stopped (pid ${r.pid}${r.forced ? ', killed after timeout' : ''}).` : 'atpsync daemon is not running.');
+        return 0;
+      }
+      case 'logs':
+        await logsCommand({ follow: Boolean(values.follow), write: env.io.stdout });
+        return 0;
+      // 'mcp' is added in Task 10.
       default:
         throw new AtpsyncError('USAGE', `Unknown command "${cmd}".\n\n${USAGE}`);
     }
