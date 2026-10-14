@@ -5,10 +5,10 @@
  */
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { sha256Hex } from '../src/lexicon/build';
-import { isIgnored } from '../src/obsidian/ignore';
-import type { VaultAdapter } from '../src/sync/engine';
-import type { LocalFile } from '../src/sync/reconcile';
+import { sha256Hex } from '@atproto-sync/core/lexicon/build';
+import { isIgnored } from '@atproto-sync/core/sync/ignore';
+import type { VaultAdapter } from '@atproto-sync/core/sync/engine';
+import type { LocalFile } from '@atproto-sync/core/sync/reconcile';
 
 const MARKDOWN_RE = /\.md$/i;
 

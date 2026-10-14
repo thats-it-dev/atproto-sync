@@ -2,14 +2,14 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { FakePds } from '../../src/sync/fake-pds';
-import { toB64 } from '../../src/crypto/box';
-import { isIgnored } from '../../src/obsidian/ignore';
-import { VaultWatcher } from '../../pi-extension/watcher';
-import { DEFAULT_CONFIG, DEFAULT_IGNORES, loadConfig, saveConfig, boundVaultDir } from '../../pi-extension/config';
-import { runSync, togglePublic } from '../../pi-extension/session';
-import { runSetup, createVault, unlockVault, type SetupIO } from '../../pi-extension/setup';
-import { FsVaultAdapter } from '../../pi-extension/fs-vault';
+import { FakePds } from '@atproto-sync/core/sync/fake-pds';
+import { toB64 } from '@atproto-sync/core/crypto/box';
+import { isIgnored } from '@atproto-sync/core/sync/ignore';
+import { VaultWatcher } from '../src/watcher';
+import { DEFAULT_CONFIG, DEFAULT_IGNORES, loadConfig, saveConfig, boundVaultDir } from '../src/config';
+import { runSync, togglePublic } from '../src/session';
+import { runSetup, createVault, unlockVault, type SetupIO } from '../src/setup';
+import { FsVaultAdapter } from '../src/fs-vault';
 
 let tmp: string;
 beforeAll(async () => {

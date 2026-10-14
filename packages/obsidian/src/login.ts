@@ -1,5 +1,5 @@
 import { requestUrl } from 'obsidian';
-import { LoginOptions, RealPdsClient, login as pdsLogin } from './pds-client';
+import { LoginOptions, RealPdsClient, login as pdsLogin } from '@atproto-sync/core/atproto/pds-client';
 
 /**
  * Handle → DID → PDS endpoint resolution using Obsidian's requestUrl (the

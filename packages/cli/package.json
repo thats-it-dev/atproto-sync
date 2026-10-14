@@ -1,0 +1,13 @@
+{
+  "name": "@atproto-sync/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@atproto-sync/core": "workspace:*"
+  }
+}

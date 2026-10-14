@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi } from 'vitest';
-import { IndexedDbStore } from '../../src/obsidian/store';
+import { IndexedDbStore } from '../src/store';
 
 const entry = (path: string, rkey: string) => ({
   path,

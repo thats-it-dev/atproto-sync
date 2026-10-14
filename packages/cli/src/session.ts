@@ -4,17 +4,17 @@
  */
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { RealPdsClient, login } from '../src/obsidian/pds-client';
-import type { PdsClient } from '../src/sync/pds';
-import { isPublicNote, removePublicFlag, setPublicFlag } from '../src/publish/frontmatter';
-import { fromB64 } from '../src/crypto/box';
+import { RealPdsClient, login } from '@atproto-sync/core/atproto/pds-client';
+import type { PdsClient } from '@atproto-sync/core/sync/pds';
+import { isPublicNote, removePublicFlag, setPublicFlag } from '@atproto-sync/core/publish/frontmatter';
+import { fromB64 } from '@atproto-sync/core/crypto/box';
 import {
   NOTE_COLLECTION,
   ATTACHMENT_COLLECTION,
   VAULT_COLLECTION,
-} from '../src/lexicon/build';
-import type { VaultRecord } from '../src/lexicon/types';
-import { SyncEngine } from '../src/sync/engine';
+} from '@atproto-sync/core/lexicon/build';
+import type { VaultRecord } from '@atproto-sync/core/lexicon/types';
+import { SyncEngine } from '@atproto-sync/core/sync/engine';
 import { FsVaultAdapter, isMarkdownPath, resolveInsideVault } from './fs-vault';
 import { FsIndexStore } from './fs-store';
 import { resolvePdsUrl } from './resolve-pds';

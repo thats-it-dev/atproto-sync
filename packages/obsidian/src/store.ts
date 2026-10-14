@@ -1,5 +1,5 @@
-import type { IndexStore } from '../sync/engine';
-import type { IndexEntry } from '../sync/reconcile';
+import type { IndexStore } from '@atproto-sync/core/sync/engine';
+import type { IndexEntry } from '@atproto-sync/core/sync/reconcile';
 
 const STORE_NAME = 'kv';
 const INDEX_KEY = 'index';

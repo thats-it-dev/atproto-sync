@@ -1,11 +1,11 @@
 import { Notice, Plugin } from 'obsidian';
 import { Agent } from '@atproto/api';
-import { SyncEngine } from '../sync/engine';
-import { fromB64 } from '../crypto/box';
+import { SyncEngine } from '@atproto-sync/core/sync/engine';
+import { fromB64 } from '@atproto-sync/core/crypto/box';
 import { AtprotoOAuth } from './oauth';
 import { IndexedDbStore } from './store';
 import { ObsidianVaultAdapter } from './vault-adapter';
-import { RealPdsClient } from './pds-client';
+import { RealPdsClient } from '@atproto-sync/core/atproto/pds-client';
 import { login } from './login';
 import { setIconWithFallback } from './ui';
 import { AtprotoSyncSettingTab } from './settings';

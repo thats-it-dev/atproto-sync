@@ -1,8 +1,8 @@
 import { App, TFile, normalizePath } from 'obsidian';
-import type { VaultAdapter } from '../sync/engine';
-import type { LocalFile } from '../sync/reconcile';
-import { sha256Hex } from '../lexicon/build';
-import { isIgnored } from './ignore';
+import type { VaultAdapter } from '@atproto-sync/core/sync/engine';
+import type { LocalFile } from '@atproto-sync/core/sync/reconcile';
+import { sha256Hex } from '@atproto-sync/core/lexicon/build';
+import { isIgnored } from '@atproto-sync/core/sync/ignore';
 
 /** VaultAdapter over the Obsidian vault. All paths NFC-normalize at this boundary. */
 export class ObsidianVaultAdapter implements VaultAdapter {

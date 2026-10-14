@@ -1,10 +1,10 @@
 import { Agent } from '@atproto/api';
-import { VAULT_COLLECTION } from '../lexicon/build';
-import type { VaultRecord } from '../lexicon/types';
-import { fromB64, toB64 } from '../crypto/box';
-import { makeCheckValue, verifyCheckValue } from '../crypto/check';
-import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '../crypto/keys';
-import { RealPdsClient } from './pds-client';
+import { VAULT_COLLECTION } from '@atproto-sync/core/lexicon/build';
+import type { VaultRecord } from '@atproto-sync/core/lexicon/types';
+import { fromB64, toB64 } from '@atproto-sync/core/crypto/box';
+import { makeCheckValue, verifyCheckValue } from '@atproto-sync/core/crypto/check';
+import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '@atproto-sync/core/crypto/keys';
+import { RealPdsClient } from '@atproto-sync/core/atproto/pds-client';
 import { login } from './login';
 import type AtprotoSyncPlugin from './main';
 

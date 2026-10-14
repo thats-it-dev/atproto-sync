@@ -5,8 +5,8 @@
  */
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import type { IndexStore } from '../src/sync/engine';
-import type { IndexEntry } from '../src/sync/reconcile';
+import type { IndexStore } from '@atproto-sync/core/sync/engine';
+import type { IndexEntry } from '@atproto-sync/core/sync/reconcile';
 
 function isIndexEntry(value: unknown): value is IndexEntry {
   if (typeof value !== 'object' || value === null) return false;

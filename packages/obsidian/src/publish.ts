@@ -1,13 +1,13 @@
 import { App, Modal, Notice, Setting, TFile } from 'obsidian';
-import { ATTACHMENT_COLLECTION, NOTE_COLLECTION, slugify } from '../lexicon/build';
-import type { AttachmentMetaPlaintext, AttachmentRecord, NoteRecord, PlaintextContent } from '../lexicon/types';
-import { isEncrypted } from '../lexicon/build';
+import { ATTACHMENT_COLLECTION, NOTE_COLLECTION, slugify } from '@atproto-sync/core/lexicon/build';
+import type { AttachmentMetaPlaintext, AttachmentRecord, NoteRecord, PlaintextContent } from '@atproto-sync/core/lexicon/types';
+import { isEncrypted } from '@atproto-sync/core/lexicon/build';
 import {
   extractEmbedTargets,
   isPublicNote,
   removePublicFlag,
   setPublicFlag,
-} from '../publish/frontmatter';
+} from '@atproto-sync/core/publish/frontmatter';
 import type AtprotoSyncPlugin from './main';
 
 export function registerPublishCommands(plugin: AtprotoSyncPlugin): void {

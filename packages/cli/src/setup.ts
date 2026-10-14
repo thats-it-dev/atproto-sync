@@ -4,13 +4,13 @@
  * unit-testable with FakePds.
  */
 import * as path from 'node:path';
-import { VAULT_COLLECTION } from '../src/lexicon/build';
-import type { VaultRecord } from '../src/lexicon/types';
-import { fromB64, toB64 } from '../src/crypto/box';
-import { makeCheckValue, verifyCheckValue } from '../src/crypto/check';
-import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '../src/crypto/keys';
-import type { PdsClient } from '../src/sync/pds';
-import { login as realLogin } from '../src/obsidian/pds-client';
+import { VAULT_COLLECTION } from '@atproto-sync/core/lexicon/build';
+import type { VaultRecord } from '@atproto-sync/core/lexicon/types';
+import { fromB64, toB64 } from '@atproto-sync/core/crypto/box';
+import { makeCheckValue, verifyCheckValue } from '@atproto-sync/core/crypto/check';
+import { DEFAULT_KDF_PARAMS, deriveMasterKey, generateSalt } from '@atproto-sync/core/crypto/keys';
+import type { PdsClient } from '@atproto-sync/core/sync/pds';
+import { login as realLogin } from '@atproto-sync/core/atproto/pds-client';
 import { ensureVaultDir, expandVaultPath, loadConfig, saveConfig } from './config';
 import { resolvePdsUrl } from './resolve-pds';
 

@@ -2,12 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { FakePds } from '../../src/sync/fake-pds';
-import { SyncEngine } from '../../src/sync/engine';
-import { FsVaultAdapter } from '../../pi-extension/fs-vault';
-import { FsIndexStore } from '../../pi-extension/fs-store';
-import { DEFAULT_CONFIG, expandVaultPath, loadConfig, saveConfig } from '../../pi-extension/config';
-import { createVault, listVaults, unlockVault, WrongPassphraseError } from '../../pi-extension/setup';
+import { FakePds } from '@atproto-sync/core/sync/fake-pds';
+import { SyncEngine } from '@atproto-sync/core/sync/engine';
+import { FsVaultAdapter } from '../src/fs-vault';
+import { FsIndexStore } from '../src/fs-store';
+import { DEFAULT_CONFIG, expandVaultPath, loadConfig, saveConfig } from '../src/config';
+import { createVault, listVaults, unlockVault, WrongPassphraseError } from '../src/setup';
 
 const IGNORES = ['.obsidian/', '.atpsync/', '.git/'];
 
