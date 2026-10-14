@@ -6,12 +6,12 @@
  * another host, or one whose holder is unreadable, is stale once its mtime is
  * older than staleMs (a crashed holder on another machine sharing the folder).
  */
-import { promises as fs, type Stats } from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-import { AtpsyncError } from "./errors";
-import { lockPath } from "./paths";
-import { isAlive } from "./pidfile";
+import { promises as fs, type Stats } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { AtpsyncError } from './errors';
+import { lockPath } from './paths';
+import { isAlive } from './pidfile';
 
 export interface VaultLock {
   release(): Promise<void>;
@@ -34,8 +34,8 @@ interface Holder {
 
 async function readHolder(file: string): Promise<Holder | null> {
   try {
-    const h = JSON.parse(await fs.readFile(file, "utf8")) as Holder;
-    return typeof h.pid === "number" && typeof h.host === "string" ? h : null;
+    const h = JSON.parse(await fs.readFile(file, 'utf8')) as Holder;
+    return typeof h.pid === 'number' && typeof h.host === 'string' ? h : null;
   } catch {
     return null;
   }
@@ -80,9 +80,9 @@ async function tryCreate(
     startedAt: new Date().toISOString(),
   };
   try {
-    await fs.writeFile(file, JSON.stringify(me), { flag: "wx" });
+    await fs.writeFile(file, JSON.stringify(me), { flag: 'wx' });
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") return null;
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return null;
     throw err;
   }
   const heartbeat = setInterval(() => {
@@ -136,7 +136,7 @@ export async function breakStale(
   try {
     await fs.rename(file, aside);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return true; // someone else broke it first
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true; // someone else broke it first
     throw err;
   }
   const moved = await fs.stat(aside);
@@ -161,10 +161,10 @@ async function restore(aside: string, file: string): Promise<void> {
   try {
     await fs.link(aside, file);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
       const free = await fs.stat(file).then(
         () => false,
-        (e: NodeJS.ErrnoException) => e.code === "ENOENT",
+        (e: NodeJS.ErrnoException) => e.code === 'ENOENT',
       );
       if (free) {
         try {
@@ -189,8 +189,8 @@ export async function acquireLock(
     if (lock) return lock;
     if (Date.now() >= deadline) {
       throw new AtpsyncError(
-        "LOCK_TIMEOUT",
-        "Timed out waiting for another atpsync process to finish syncing this vault.",
+        'LOCK_TIMEOUT',
+        'Timed out waiting for another atpsync process to finish syncing this vault.',
       );
     }
     await new Promise((r) => setTimeout(r, opts.pollMs ?? 250));

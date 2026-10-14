@@ -28,6 +28,23 @@ error, so it is safe to call from a login script.
   (default 1). Set `"remote": "poll"` in the config to disable the stream.
 - Several atpsync processes (daemon, `atpsync sync`, MCP) coordinate through
   `<vault>/.atpsync/lock`.
+- The event stream carries every account hosted on your PDS, not just yours. On a small or
+  self-hosted PDS that is a trickle; on large shared hosts (e.g. Bluesky's) it is a continuous
+  stream of data. Set `"remote": "poll"` in the config to avoid it and rely on polling.
+- After sleep/wake or a failed sync the daemon reconnects and retries on its own (retries back
+  off from 30 s to 5 min).
+
+## Rotating the app password
+
+After revoking an app password, run `atpsync setup` and enter the new one when prompted (setup
+stops and restarts a running daemon). Until then the daemon stops signing in and `atpsync status`
+shows it as `auth-failed`.
+
+## Shared folders
+
+- If the vault folder is also synced by Syncthing, Dropbox, iCloud or similar, exclude
+  `.atpsync/` from that tool: it holds this machine's sync index, lock and daemon status.
+- Don't run the Obsidian plugin and the atpsync daemon on the same folder at the same time.
 
 ## Commands
 

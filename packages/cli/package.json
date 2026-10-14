@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "bin": { "atpsync": "dist/atpsync.cjs" },
+  "engines": { "node": ">=22" },
   "scripts": {
     "build": "node build.mjs",
     "test": "vitest run",
