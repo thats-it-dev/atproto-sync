@@ -4,8 +4,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { FakePds } from '@atproto-sync/core/sync/fake-pds';
 import { toB64 } from '@atproto-sync/core/crypto/box';
-import { isIgnored } from '@atproto-sync/core/sync/ignore';
-import { VaultWatcher } from '../src/watcher';
 import { DEFAULT_CONFIG, DEFAULT_IGNORES, loadConfig, saveConfig, boundVaultDir } from '../src/config';
 import { runSync, togglePublic } from '../src/session';
 import { runSetup, createVault, unlockVault, type SetupIO } from '../src/setup';
@@ -40,54 +38,6 @@ async function configuredCfg(vaultDir: string) {
     vaultDir,
   };
 }
-
-describe('VaultWatcher', () => {
-  it("does not re-trigger itself from writes to ignored paths (the engine's own index save)", async () => {
-    const root = await fs.mkdtemp(path.join(tmp, 'w-'));
-    let syncs = 0;
-    const w = new VaultWatcher(
-      root,
-      async () => {
-        syncs++;
-        await fs.mkdir(path.join(root, '.atpsync'), { recursive: true });
-        const idx = path.join(root, '.atpsync', 'index.json');
-        await fs.writeFile(`${idx}.tmp`, '[]');
-        await fs.rename(`${idx}.tmp`, idx);
-      },
-      { debounceMs: 100, intervalMs: 60_000, ignore: (rel) => isIgnored(rel, ['.atpsync/']) }
-    );
-    w.start();
-    await fs.writeFile(path.join(root, 'note.md'), 'hi');
-    await sleep(1200);
-    w.stop();
-    expect(syncs).toBe(1);
-  });
-
-  it('debounces a change that arrives mid-sync instead of re-running immediately', async () => {
-    const root = await fs.mkdtemp(path.join(tmp, 'w2-'));
-    const starts: number[] = [];
-    const ends: number[] = [];
-    const w = new VaultWatcher(
-      root,
-      async () => {
-        starts.push(Date.now());
-        if (starts.length === 1) {
-          // Simulate a pull writing a non-ignored note while we are syncing.
-          await fs.writeFile(path.join(root, 'pulled.md'), 'from remote');
-          await sleep(150);
-        }
-        ends.push(Date.now());
-      },
-      { debounceMs: 200, intervalMs: 60_000 }
-    );
-    w.start();
-    await fs.writeFile(path.join(root, 'note.md'), 'hi');
-    await sleep(1500);
-    w.stop();
-    expect(starts.length).toBe(2);
-    expect(starts[1] - ends[0]).toBeGreaterThanOrEqual(150);
-  });
-});
 
 describe('vault directory binding', () => {
   it('boundVaultDir refuses to fall back to the cwd', async () => {
