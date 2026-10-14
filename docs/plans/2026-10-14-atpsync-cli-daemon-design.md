@@ -31,18 +31,17 @@ pnpm workspaces:
   `pds-client.ts` and `ignore.ts` moved out of `src/obsidian/` (neither depends
   on Obsidian). `lexicons/` moves here too.
 - `packages/obsidian` — the plugin (`src/obsidian/*` minus the moved files),
-  its esbuild config, `styles.css`.
+  its esbuild config. `styles.css` stays at the repo root and the build writes `main.js` to the repo root, so the plugin dev symlink and release asset paths are unchanged.
 - `packages/cli` — the new tool (Phase B).
 
 Constraints:
 
 - Obsidian's community updater reads `manifest.json` and `versions.json` from
   the **repo root**; they stay there. The plugin build reads the root
-  `manifest.json`. The release workflow builds `packages/obsidian` and attaches
-  its `main.js`, `styles.css` and the root `manifest.json`; the tag-vs-manifest
-  check is unchanged.
+  `manifest.json`. The release workflow is unchanged apart from the pnpm version.
 - Tests move with their code (`tests/{crypto,lexicon,publish,sync}` →
   `packages/core/test`, `tests/obsidian` → split by where the module lands).
+- Phase A also moves the pi extension's plain-Node modules into `packages/cli/src/` and deletes `pi-extension/index.ts` and the pi dependencies; Phase B builds the CLI on those modules.
 
 Acceptance: `pnpm -r typecheck` and `pnpm -r test` pass; the plugin build
 produces a functionally identical `main.js`; the release workflow still

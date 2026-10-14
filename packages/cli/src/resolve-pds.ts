@@ -1,6 +1,6 @@
 /**
  * Handle -> DID -> PDS endpoint resolution for plain Node (port of
- * src/obsidian/login.ts, which uses Obsidian's requestUrl; here we use fetch).
+ * packages/obsidian/src/login.ts, which uses Obsidian's requestUrl; here we use fetch).
  */
 export async function resolvePdsUrl(handle: string): Promise<{ did: string; pdsUrl: string }> {
   let didJson: unknown;

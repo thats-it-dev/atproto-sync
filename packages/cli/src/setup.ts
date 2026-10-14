@@ -1,5 +1,5 @@
 /**
- * Vault onboarding for the CLI/pi context (port of src/obsidian/onboarding.ts,
+ * Vault onboarding for the CLI/pi context (port of packages/obsidian/src/onboarding.ts,
  * minus the Obsidian plugin coupling). Operates on any PdsClient so it is
  * unit-testable with FakePds.
  */

@@ -53,20 +53,11 @@ End-to-end encrypted by default.
 
 ```bash
 pnpm install
-pnpm test          # vitest suite (unit, scenario, seeded fuzz)
-pnpm run build     # produces main.js
+pnpm test          # all packages (core, obsidian, cli)
+pnpm run build     # produces main.js at the repo root
 ```
 
-The sync engine, crypto, and reconciler are plain TypeScript with no Obsidian
-dependency and are fully unit-tested; see `docs/` for the design documents and
-the manual testing guide (including a local Docker PDS setup).
-
-## pi extension (sync without Obsidian)
-
-[`pi-extension/`](pi-extension/README.md) runs the same engine against a plain vault directory
-from the [pi](https://github.com/earendil-works/pi) coding agent: `/atpsync setup|sync|status|
-publish|unpublish|watch`, plus `atpsync_*` tools the model can call. App-password auth, config in
-`~/.config/atpsync/`, index in `<vault>/.atpsync/`.
+The repo is a pnpm workspace: `packages/core` (sync engine, crypto, reconciler — no Obsidian dependency, fully unit-tested), `packages/obsidian` (the plugin), and `packages/cli` (the `atpsync` command-line tool). See `docs/` for the design documents and the manual testing guide (including a local Docker PDS setup).
 
 ## License
 
