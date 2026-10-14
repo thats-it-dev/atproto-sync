@@ -31,6 +31,13 @@ export interface DaemonDeps {
   subscriptionBackoffMs?: { min: number; max: number };
   /** Poll interval while not subscribed (default: config syncIntervalMinutes; tests only). */
   pollMs?: number;
+  /** Wall-clock jump (sleep/wake) detector: check interval and allowed lag (default 10 s / 30 s). */
+  wakeCheckMs?: number;
+  wakeThresholdMs?: number;
+  /** Clock for the wake detector (tests). */
+  now?: () => number;
+  /** Retry after a failed sync: first and maximum delay, doubling in between (default 30 s / 5 min). */
+  retryBackoffMs?: { min: number; max: number };
 }
 
 /** Identifies the credentials a sign-in was attempted with, without keeping the password. */
@@ -133,6 +140,28 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
     return p;
   };
 
+  // --- Retry after a failed sync (offline, PDS error), backing off; reset on success.
+  const retryMin = deps.retryBackoffMs?.min ?? 30_000;
+  const retryMax = deps.retryBackoffMs?.max ?? 5 * 60_000;
+  let retryDelay = retryMin;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let shuttingDown = false;
+  const clearRetry = () => {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
+  };
+  const scheduleRetry = () => {
+    if (shuttingDown) return;
+    clearRetry();
+    log.info(`retrying in ${Math.round(retryDelay / 1000)} s`);
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      scheduler.trigger('poll');
+    }, retryDelay);
+    retryTimer.unref();
+    retryDelay = Math.min(retryDelay * 2, retryMax);
+  };
+
   const run = async (reason: Trigger): Promise<'ok' | 'busy'> => {
     let cfg: AtpsyncConfig;
     try {
@@ -158,6 +187,8 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
       log.info(`sync (${reason}): ${s.opsExecuted} operation(s)`);
       for (const w of s.warnings) log.warn(w);
       await state.update({ lastSyncAt: s.lastSyncAt, lastResult: 'ok', lastError: null });
+      clearRetry();
+      retryDelay = retryMin;
     } catch (err) {
       if (authFailedFp === null) {
         // A 401 from a PDS call (not the sign-in) means the session died: log in afresh next time.
@@ -170,10 +201,12 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
     return 'ok';
   };
 
+  /** A non-auth failure: record it and schedule a retry. */
   async function recordFailure(reason: Trigger, err: unknown): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`sync (${reason}) failed: ${msg}`);
     await state.update({ lastResult: 'error', lastError: msg });
+    scheduleRetry();
   }
 
   const scheduler = new SyncScheduler(run, {
@@ -219,6 +252,26 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
   scheduler.trigger('startup');
   const rotate = setInterval(() => log.rotateIfNeeded?.(), 60 * 60_000);
   rotate.unref();
+
+  // After sleep/suspend, timers fire late and the event-stream socket is usually
+  // dead without a close event: on a wall-clock jump, reconnect and sync now.
+  const now = deps.now ?? Date.now;
+  const wakeCheckMs = deps.wakeCheckMs ?? 10_000;
+  const wakeThresholdMs = deps.wakeThresholdMs ?? 30_000;
+  let lastTick = now();
+  const wake = setInterval(() => {
+    const t = now();
+    const lag = t - lastTick - wakeCheckMs;
+    lastTick = t;
+    if (lag <= wakeThresholdMs) return;
+    log.info(`wake detected (clock jumped ${Math.round(lag / 1000)} s); reconnecting and syncing`);
+    if (subscription) {
+      subscription.stop();
+      subscription.start();
+    }
+    scheduler.trigger('startup');
+  }, wakeCheckMs);
+  wake.unref();
   log.info(`daemon started (pid ${process.pid}) for ${vaultDir}`);
 
   const onSignal = (sig: string) => {
@@ -231,7 +284,10 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
   signals.off('SIGTERM', onSignal);
   signals.off('SIGINT', onSignal);
 
+  shuttingDown = true;
   clearInterval(rotate);
+  clearInterval(wake);
+  clearRetry();
   subscription?.stop();
   unwatch();
   await scheduler.stop(); // lets an in-flight sync finish and release the lock

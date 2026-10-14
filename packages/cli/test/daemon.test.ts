@@ -202,4 +202,60 @@ describe('runDaemon', () => {
     expect(logs.some((l) => l.includes('config changed'))).toBe(true);
     await expect(fs.access(pidPath())).rejects.toThrow();
   });
+
+  it('retries a failed sync with backoff, without any external trigger', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir);
+    await saveConfig(cfg);
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'x');
+    const pds = new FakePds();
+    const at: number[] = [];
+    const { deps, signals, logs } = harness(cfg, async () => {
+      at.push(Date.now());
+      if (at.length <= 2) throw new Error('connect ECONNREFUSED');
+      return { pds, did: 'did:plc:me', pdsUrl: 'http://fake' };
+    });
+    deps.retryBackoffMs = { min: 40, max: 1000 };
+    const done = runDaemon(deps);
+    await waitFor(async () => (await pds.listRecords('app.notesky.note')).length === 1, 3000);
+    expect(at).toHaveLength(3);
+    expect(at[2] - at[1]).toBeGreaterThanOrEqual(75); // second retry waits twice as long
+    expect(logs.filter((l) => l.includes('retrying in'))).toHaveLength(2);
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+  });
+
+  it('on a wall-clock jump (sleep/wake) reconnects the event stream and syncs', async () => {
+    const { vaultDir } = await tempEnv();
+    const cfg = await configuredCfg(vaultDir, { remote: 'subscribe' });
+    await saveConfig(cfg);
+    const pds = new FakePds();
+    const wss = new WebSocketServer({ port: 0 });
+    await new Promise<void>((r) => wss.once('listening', () => r()));
+    const pdsUrl = `http://127.0.0.1:${(wss.address() as AddressInfo).port}`;
+    let connections = 0;
+    wss.on('connection', () => connections++);
+    const { deps, signals, logs } = harness(cfg, async () => ({ pds, did: 'did:plc:me', pdsUrl }));
+    const syncs = () => logs.filter((l) => l.startsWith('I sync (startup)')).length;
+    deps.subscribedPollMs = 60 * 60_000;
+    let clock = 1_000_000;
+    deps.now = () => clock;
+    deps.wakeCheckMs = 20;
+    deps.wakeThresholdMs = 1000;
+    const done = runDaemon(deps);
+    await waitFor(() => connections === 1);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+    await sleep(100);
+    const before = syncs();
+    expect(logs.some((l) => l.includes('wake detected'))).toBe(false);
+
+    clock += 10 * 60_000; // the machine slept for ten minutes
+    await waitFor(() => logs.some((l) => l.includes('wake detected')));
+    await waitFor(() => connections === 2);
+    await waitFor(() => syncs() > before);
+
+    signals.emit('SIGTERM', 'SIGTERM');
+    await done;
+    await new Promise<void>((r) => wss.close(() => r()));
+  });
 });

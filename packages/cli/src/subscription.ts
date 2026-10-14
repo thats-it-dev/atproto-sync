@@ -64,48 +64,79 @@ export interface SubscriptionOptions {
   log?(message: string): void;
   minBackoffMs?: number;
   maxBackoffMs?: number;
+  /** A connection must stay open this long before the backoff resets (default 30 s). */
+  stableMs?: number;
+  /** Jitter source for backoffDelay (tests). */
+  random?: () => number;
 }
 
 export class RepoSubscription {
   private ws: WebSocket | null = null;
   private attempt = 0;
-  private stopped = false;
+  private stopped = true;
+  /** Bumped by every start/stop so a connect() in flight from an earlier run gives up. */
+  private generation = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private stableTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly opts: SubscriptionOptions) {}
 
+  /** Connect (no-op while already started). */
   start(): void {
+    if (!this.stopped) return;
     this.stopped = false;
+    this.generation++;
     void this.connect();
   }
 
   stop(): void {
     this.stopped = true;
+    this.generation++;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.stableTimer) clearTimeout(this.stableTimer);
     this.retryTimer = null;
-    this.ws?.close();
+    this.stableTimer = null;
+    const ws = this.ws;
     this.ws = null;
+    ws?.close();
   }
 
   private async connect(): Promise<void> {
-    if (this.stopped) return;
+    const gen = this.generation;
+    const current = () => !this.stopped && this.generation === gen;
+    if (!current()) return;
     let target: SubscriptionTarget;
     try {
       target = await this.opts.resolveTarget();
     } catch (err) {
+      if (!current()) return;
       this.opts.log?.(`event stream: cannot reach PDS (${(err as Error).message})`);
       this.scheduleReconnect();
       return;
     }
-    if (this.stopped) return;
-    const ws = new WebSocket(subscribeReposUrl(target.pdsUrl));
+    if (!current()) return;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(subscribeReposUrl(target.pdsUrl));
+    } catch (err) {
+      this.opts.log?.(`event stream: cannot open ${target.pdsUrl} (${(err as Error).message})`);
+      this.scheduleReconnect();
+      return;
+    }
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
-      this.attempt = 0;
+      if (this.ws !== ws) return;
+      // Reset the backoff only once the connection proves stable, so a server
+      // that accepts and immediately drops us is not hammered at the minimum delay.
+      this.stableTimer = setTimeout(() => {
+        this.stableTimer = null;
+        if (this.ws === ws) this.attempt = 0;
+      }, this.opts.stableMs ?? 30_000);
       this.opts.onState('subscribed');
     };
     ws.onmessage = (ev: MessageEvent) => {
+      if (this.ws !== ws) return;
       if (!(ev.data instanceof ArrayBuffer)) return;
       const f = decodeFrame(new Uint8Array(ev.data));
       if (!f) return;
@@ -118,15 +149,24 @@ export class RepoSubscription {
     };
     ws.onerror = () => {}; // a close event always follows
     ws.onclose = () => {
-      if (this.ws === ws) this.ws = null;
-      if (!this.stopped) this.scheduleReconnect();
+      if (this.ws !== ws) return; // stopped, or superseded by a newer socket
+      this.ws = null;
+      if (this.stableTimer) clearTimeout(this.stableTimer);
+      this.stableTimer = null;
+      this.scheduleReconnect();
     };
   }
 
   private scheduleReconnect(): void {
     if (this.stopped) return;
     this.opts.onState('reconnecting');
-    const delay = backoffDelay(this.attempt++, this.opts.minBackoffMs ?? 1000, this.opts.maxBackoffMs ?? 60_000);
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    const delay = backoffDelay(
+      this.attempt++,
+      this.opts.minBackoffMs ?? 1000,
+      this.opts.maxBackoffMs ?? 60_000,
+      this.opts.random
+    );
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       void this.connect();

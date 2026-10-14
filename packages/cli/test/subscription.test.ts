@@ -140,4 +140,71 @@ describe('RepoSubscription against a local websocket server', () => {
     await waitFor(() => states.includes('subscribed'));
     expect(states[0]).toBe('reconnecting');
   });
+
+  it('a target URL that cannot be opened schedules a reconnect instead of rejecting', async () => {
+    let resolves = 0;
+    const states: SubscriptionState[] = [];
+    const logs: string[] = [];
+    sub = new RepoSubscription({
+      resolveTarget: async () => {
+        resolves++;
+        return { pdsUrl: 'not a url', did: ME };
+      },
+      onRelevant: () => {},
+      onState: (s) => states.push(s),
+      log: (m) => logs.push(m),
+      minBackoffMs: 10,
+      maxBackoffMs: 20,
+    });
+    sub.start();
+    await waitFor(() => resolves >= 3);
+    expect(states.every((s) => s === 'reconnecting')).toBe(true);
+    expect(logs[0]).toMatch(/cannot open not a url/);
+  });
+
+  it('keeps backing off against a server that accepts and immediately closes', async () => {
+    const at: number[] = [];
+    const pdsUrl = await server((s) => {
+      at.push(Date.now());
+      s.close();
+    });
+    sub = new RepoSubscription({
+      resolveTarget: async () => ({ pdsUrl, did: ME }),
+      onRelevant: () => {},
+      onState: () => {},
+      minBackoffMs: 20,
+      maxBackoffMs: 2000,
+      random: () => 1, // no jitter: delays 20, 40, 80, 160, ...
+    });
+    sub.start();
+    await waitFor(() => at.length >= 5, 5000);
+    const gaps = at.slice(1).map((t, i) => t - at[i]);
+    expect(gaps[3]).toBeGreaterThanOrEqual(160);
+    expect(gaps[3]).toBeGreaterThan(gaps[0] * 2);
+  });
+
+  it('start is a no-op while started, and a restart does not leave two sockets', async () => {
+    let connections = 0;
+    const pdsUrl = await server(() => connections++);
+    let resolves = 0;
+    sub = new RepoSubscription({
+      resolveTarget: async () => {
+        resolves++;
+        return { pdsUrl, did: ME };
+      },
+      onRelevant: () => {},
+      onState: () => {},
+    });
+    sub.start();
+    sub.start();
+    await waitFor(() => connections === 1);
+    sub.stop();
+    sub.start();
+    sub.stop();
+    sub.start();
+    await waitFor(() => connections === 2);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(connections).toBe(2);
+    expect(resolves).toBe(3);
+  });
 });
