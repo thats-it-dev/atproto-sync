@@ -29,6 +29,8 @@ export interface CliEnv {
   deps: CommandDeps;
   ctl: StartDeps;
   cwd: string;
+  /** Interactive setup (default: TTY prompts); replaceable in tests. */
+  setup?: (cwd: string, folder?: string) => Promise<void>;
 }
 
 export const USAGE = `atpsync ${VERSION} — sync a vault folder with your ATProto PDS (E2E-encrypted)
@@ -115,10 +117,19 @@ export async function main(argv: string[], env: CliEnv = defaultEnv()): Promise<
         emit(r, `Logged out${r.stoppedDaemon ? ' (daemon stopped)' : ''}. Run \`atpsync setup\` to sign back in.`);
         return 0;
       }
-      case 'setup':
-        await runSetup(createTtyIO(env.cwd, rest.join(' ') || undefined));
+      case 'setup': {
+        // The daemon would keep syncing under the old binding/credentials: stop it, restart it after.
+        const stopped = await stopCommand();
+        if (stopped.wasRunning) env.io.stderr(`Stopped the atpsync daemon (pid ${stopped.pid}) for setup.\n`);
+        const setup = env.setup ?? ((cwd, folder) => runSetup(createTtyIO(cwd, folder)));
+        await setup(env.cwd, rest.join(' ') || undefined);
         clearConnectionCache();
+        if (stopped.wasRunning) {
+          const r = await startCommand(deps, env.ctl);
+          env.io.stdout(`atpsync daemon restarted (pid ${r.pid}).\n`);
+        }
         return 0;
+      }
       case 'daemon': {
         const log = createFileLogger(logPath(), { mirror: process.stdout.isTTY ? process.stdout : null });
         log.rotateIfNeeded();

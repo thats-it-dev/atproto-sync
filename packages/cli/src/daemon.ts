@@ -36,6 +36,17 @@ export interface DaemonDeps {
 /** Identifies the credentials a sign-in was attempted with, without keeping the password. */
 const credentialFingerprint = (cfg: AtpsyncConfig): string => sha256(`${cfg.identifier}\0${cfg.appPassword}`);
 
+/** What this daemon is bound to; a change means it must be restarted (setup picked another vault or account). */
+function bindingOf(cfg: AtpsyncConfig): string {
+  let vaultDir = '';
+  try {
+    vaultDir = boundVaultDir(cfg);
+  } catch {
+    // unbound: compares unequal to the startup binding
+  }
+  return JSON.stringify([cfg.identifier, cfg.vaultRkey, vaultDir, cfg.masterKeyB64]);
+}
+
 export async function runDaemon(deps: DaemonDeps): Promise<void> {
   const { log } = deps;
   const signals = deps.signals ?? process;
@@ -44,7 +55,13 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
     throw new AtpsyncError('NOT_CONFIGURED', 'atpsync is not configured. Run `atpsync setup` first.');
   }
   const vaultDir = boundVaultDir(cfg0);
+  const binding = bindingOf(cfg0);
   await writePidExclusive(process.pid);
+
+  let requestStop: (reason: string) => void = () => {};
+  const stopRequested = new Promise<string>((resolve) => {
+    requestStop = resolve;
+  });
 
   const state = new DaemonStateWriter(vaultDir, {
     pid: process.pid,
@@ -124,6 +141,11 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
       await recordFailure(reason, err);
       return 'ok';
     }
+    if (bindingOf(cfg) !== binding) {
+      log.info('config changed (account, vault or folder); stopping. Run `atpsync start` to start again.');
+      requestStop('config changed; run `atpsync start`');
+      return 'ok';
+    }
     if (authBlocked(cfg)) return 'ok'; // logged once by markAuthFailed
     const lock = await tryAcquireLock(vaultDir);
     if (!lock) {
@@ -199,22 +221,21 @@ export async function runDaemon(deps: DaemonDeps): Promise<void> {
   rotate.unref();
   log.info(`daemon started (pid ${process.pid}) for ${vaultDir}`);
 
-  await new Promise<void>((resolve) => {
-    const onSignal = (sig: string) => {
-      signals.off('SIGTERM', onSignal);
-      signals.off('SIGINT', onSignal);
-      log.info(`received ${sig}, shutting down`);
-      resolve();
-    };
-    signals.once('SIGTERM', onSignal);
-    signals.once('SIGINT', onSignal);
-  });
+  const onSignal = (sig: string) => {
+    log.info(`received ${sig}, shutting down`);
+    requestStop(`stopped at ${new Date().toISOString()}`);
+  };
+  signals.once('SIGTERM', onSignal);
+  signals.once('SIGINT', onSignal);
+  const exitReason = await stopRequested;
+  signals.off('SIGTERM', onSignal);
+  signals.off('SIGINT', onSignal);
 
   clearInterval(rotate);
   subscription?.stop();
   unwatch();
   await scheduler.stop(); // lets an in-flight sync finish and release the lock
-  await state.update({ lastExit: `stopped at ${new Date().toISOString()}` });
+  await state.update({ lastExit: exitReason });
   await removePid(process.pid);
   log.info('daemon stopped');
 }

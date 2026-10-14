@@ -55,20 +55,47 @@ export function configPath(): string {
   return path.join(configDir(), 'config.json');
 }
 
+/**
+ * Missing file: defaults. Unreadable or malformed file: an error, never
+ * defaults (the next sync would persist them over the user's credentials).
+ */
 export async function loadConfig(): Promise<AtpsyncConfig> {
+  const p = configPath();
+  let raw: string;
   try {
-    const raw = await fs.readFile(configPath(), 'utf8');
-    const parsed = JSON.parse(raw) as Partial<AtpsyncConfig>;
-    return { ...DEFAULT_CONFIG, ...parsed };
-  } catch {
-    return { ...DEFAULT_CONFIG, ignorePatterns: [...DEFAULT_IGNORES] };
+    raw = await fs.readFile(p, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { ...DEFAULT_CONFIG, ignorePatterns: [...DEFAULT_IGNORES] };
+    }
+    throw new AtpsyncError('ERROR', `Could not read ${p}: ${(err as Error).message}. Fix or remove the file.`);
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new AtpsyncError('ERROR', `Could not read ${p}: ${(err as Error).message}. Fix or remove the file.`);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new AtpsyncError('ERROR', `Could not read ${p}: not a JSON object. Fix or remove the file.`);
+  }
+  return { ...DEFAULT_CONFIG, ...(parsed as Partial<AtpsyncConfig>) };
 }
 
+/** Atomic write (temp file + rename), mode 0600, so a crash or a concurrent reader never sees a partial file. */
 export async function saveConfig(cfg: AtpsyncConfig): Promise<void> {
   await fs.mkdir(configDir(), { recursive: true });
   const p = configPath();
-  await fs.writeFile(p, JSON.stringify(cfg, null, 2), { encoding: 'utf8', mode: 0o600 });
+  // Unique per writer: the daemon, a one-shot command and setup may save at the same time.
+  const tmp = `${p}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(cfg, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await fs.chmod(tmp, 0o600);
+    await fs.rename(tmp, p);
+  } catch (err) {
+    await fs.rm(tmp, { force: true });
+    throw err;
+  }
   // Re-assert permissions in case the file pre-existed with looser modes.
   await fs.chmod(p, 0o600).catch(() => {});
 }

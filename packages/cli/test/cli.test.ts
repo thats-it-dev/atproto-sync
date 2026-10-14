@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -106,6 +106,40 @@ describe('config', () => {
     expect(expandVaultPath('/abs/dir/', '/some/cwd')).toBe('/abs/dir');
     expect(expandVaultPath('~', '/some/cwd')).toBe(os.homedir());
     expect(expandVaultPath('~/notes', '/some/cwd')).toBe(path.join(os.homedir(), 'notes'));
+  });
+
+  it('refuses an unreadable or malformed config instead of falling back to defaults', async () => {
+    const cfgDir = path.join(await fs.mkdtemp(path.join(tmp, 'cfg-bad-')), 'atpsync');
+    process.env.ATPSYNC_CONFIG_DIR = cfgDir;
+    try {
+      await fs.mkdir(cfgDir, { recursive: true });
+      await fs.writeFile(path.join(cfgDir, 'config.json'), '{"identifier": "me.test", ');
+      await expect(loadConfig()).rejects.toMatchObject({ code: 'ERROR', message: expect.stringMatching(/Could not read .*config\.json.*Fix or remove the file/) });
+      await fs.rm(path.join(cfgDir, 'config.json'));
+      await fs.mkdir(path.join(cfgDir, 'config.json')); // EISDIR
+      await expect(loadConfig()).rejects.toMatchObject({ code: 'ERROR' });
+    } finally {
+      delete process.env.ATPSYNC_CONFIG_DIR;
+    }
+  });
+
+  it('saves atomically through a temp file, leaving no temp files behind', async () => {
+    const cfgDir = path.join(await fs.mkdtemp(path.join(tmp, 'cfg-atomic-')), 'atpsync');
+    process.env.ATPSYNC_CONFIG_DIR = cfgDir;
+    try {
+      await saveConfig({ ...DEFAULT_CONFIG, identifier: 'one' });
+      const renames = vi.spyOn(fs, 'rename');
+      await Promise.all([1, 2, 3].map((i) => saveConfig({ ...DEFAULT_CONFIG, identifier: `id${i}` })));
+      expect(renames.mock.calls.every(([from, to]) => String(from).includes('config.json.tmp') && String(to).endsWith('config.json'))).toBe(true);
+      expect(renames).toHaveBeenCalledTimes(3);
+      renames.mockRestore();
+      expect((await loadConfig()).identifier).toMatch(/^id[123]$/);
+      expect(await fs.readdir(cfgDir)).toEqual(['config.json']);
+      const st = await fs.stat(path.join(cfgDir, 'config.json'));
+      expect(st.mode & 0o777).toBe(0o600);
+    } finally {
+      delete process.env.ATPSYNC_CONFIG_DIR;
+    }
   });
 
   it('returns defaults when no config exists', async () => {

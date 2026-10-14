@@ -180,4 +180,26 @@ describe('runDaemon', () => {
     signals.emit('SIGTERM', 'SIGTERM');
     await done;
   });
+
+  it('shuts down when the config is rebound to another vault', async () => {
+    const { vaultDir } = await tempEnv();
+    let cfg = await configuredCfg(vaultDir);
+    await saveConfig(cfg);
+    const pds = new FakePds();
+    const { deps, logs } = harness(cfg, async () => ({ pds, did: 'did:plc:me', pdsUrl: 'http://fake' }));
+    deps.loadConfig = async () => cfg;
+    const done = runDaemon(deps);
+    await waitFor(async () => (await readDaemonState(vaultDir))?.lastResult === 'ok');
+
+    cfg = { ...cfg, appPassword: 'rotated' }; // credentials alone: keep running
+    await fs.writeFile(path.join(vaultDir, 'a.md'), 'x');
+    await waitFor(async () => (await pds.listRecords('app.notesky.note')).length === 1);
+
+    cfg = { ...cfg, vaultRkey: 'vault2' };
+    await fs.writeFile(path.join(vaultDir, 'b.md'), 'y');
+    await done;
+    expect((await readDaemonState(vaultDir))?.lastExit).toBe('config changed; run `atpsync start`');
+    expect(logs.some((l) => l.includes('config changed'))).toBe(true);
+    await expect(fs.access(pidPath())).rejects.toThrow();
+  });
 });
