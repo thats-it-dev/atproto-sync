@@ -23,8 +23,9 @@ End-to-end encrypted by default.
 ## Setup
 
 1. Install and enable the plugin.
-2. The setup wizard opens: sign in with Bluesky (OAuth, or an app password
-   under Advanced), then choose your encryption passphrase.
+2. The setup wizard opens: sign in with Bluesky (OAuth) or with an app
+   password, then choose your encryption passphrase. You can switch methods
+   later under Settings → Account → Sign-in method.
 3. That's it — the status bar shows sync state. Later devices enter the same
    passphrase.
 

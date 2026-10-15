@@ -15,7 +15,7 @@ export async function ensurePdsClient(plugin: AtprotoSyncPlugin): Promise<RealPd
   if (s.authMode === 'oauth' && s.authDid) {
     const session = await plugin.oauth.restore(s.authDid);
     plugin.pdsClient = new RealPdsClient(new Agent(session), s.authDid);
-  } else if (s.identifier && s.appPassword) {
+  } else if (s.authMode === 'app-password' && s.identifier && s.appPassword) {
     plugin.pdsClient = await login({
       identifier: s.identifier,
       password: s.appPassword,

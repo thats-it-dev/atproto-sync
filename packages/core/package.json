@@ -1,6 +1,6 @@
 {
   "name": "@atproto-sync/core",
-  "version": "0.1.0",
+  "version": "0.1.12",
   "private": true,
   "type": "module",
   "exports": {

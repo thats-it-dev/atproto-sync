@@ -10,6 +10,7 @@ import {
 import { PASSPHRASE_WARNING } from './settings';
 import { createBusyRow, createLinkButton } from './ui';
 import type AtprotoSyncPlugin from './main';
+import { hasAuth } from './auth-settings';
 
 type Step = 'login' | 'browser' | 'passphrase' | 'done';
 
@@ -39,9 +40,8 @@ export class SetupWizard extends Modal {
     this.plugin.activeWizard = this;
     this.contentEl.addClass('atproto-sync-wizard');
     const s = this.plugin.settings;
-    const hasAuth = s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
-    if (s.masterKeyB64 && s.vaultRkey && hasAuth) this.step = 'done';
-    else if (hasAuth) this.step = 'passphrase';
+    if (s.masterKeyB64 && s.vaultRkey && hasAuth(s)) this.step = 'done';
+    else if (hasAuth(s)) this.step = 'passphrase';
     // OAuth completes out-of-band via the protocol handler; reflect its progress.
     this.offAuthChanged = this.plugin.onAuthChanged((phase) => {
       if (this.step !== 'login' && this.step !== 'browser') return;
@@ -63,9 +63,7 @@ export class SetupWizard extends Modal {
     // Abandoned after signing in but before the passphrase: roll the auth
     // back so a half-setup never masquerades as a working sync.
     const s = this.plugin.settings;
-    const hasAuth =
-      s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
-    if (hasAuth && (!s.masterKeyB64 || !s.vaultRkey)) {
+    if (hasAuth(s) && (!s.masterKeyB64 || !s.vaultRkey)) {
       void this.plugin.wipeAuth().then(() => {
         new Notice(
           'ATProto Sync: setup incomplete — you were signed out. Click the status bar icon to finish.'
@@ -135,18 +133,27 @@ export class SetupWizard extends Modal {
       );
 
     if (!this.useAppPassword) {
-      new Setting(contentEl).addButton((b) =>
-        b
-          .setButtonText('Sign in with Bluesky')
-          .setCta()
-          .onClick(() => void this.startOAuth())
-      );
-      const alt = contentEl.createEl('p');
-      const link = alt.createEl('a', { text: 'Use an app password instead' });
-      link.addEventListener('click', () => {
-        this.useAppPassword = true;
-        this.render();
-      });
+      new Setting(contentEl)
+        .setName('Sign in with Bluesky')
+        .setDesc('Approve access on your PDS login page in the browser.')
+        .addButton((b) =>
+          b
+            .setButtonText('Sign in with Bluesky')
+            .setCta()
+            .onClick(() => void this.startOAuth())
+        );
+      new Setting(contentEl)
+        .setName('App password')
+        .setDesc('Use an app password from your PDS account settings — not your main password.')
+        .addButton((b) =>
+          b
+            .setButtonText('Use an app password')
+            .setCta()
+            .onClick(() => {
+              this.useAppPassword = true;
+              this.render();
+            })
+        );
     } else {
       new Setting(contentEl)
         .setName('App password')
@@ -214,11 +221,14 @@ export class SetupWizard extends Modal {
     await this.withBusy('Signing in…', async () => {
       try {
         const s = this.plugin.settings;
-        this.plugin.pdsClient = await login({
+        const client = await login({
           identifier: this.handle,
           password: this.appPassword,
           pdsUrl: s.pdsUrlOverride || undefined,
         });
+        if (s.authDid) await this.plugin.oauth.logout(s.authDid).catch(() => {});
+        s.authDid = '';
+        this.plugin.pdsClient = client;
         s.identifier = this.handle;
         s.appPassword = this.appPassword;
         s.authMode = 'app-password';

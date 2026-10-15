@@ -12,6 +12,7 @@ import { WrongPassphraseError, setupVaultEncryption } from './onboarding';
 import { SetupWizard } from './setup-wizard';
 import { createLinkButton } from './ui';
 import type AtprotoSyncPlugin from './main';
+import { AuthMode, hasAuth } from './auth-settings';
 
 /** Mobile sign-in: the user must tap the link themselves for Safari/Chrome to open. */
 class OpenBrowserModal extends Modal {
@@ -48,6 +49,7 @@ export const PASSPHRASE_WARNING =
 
 export class AtprotoSyncSettingTab extends PluginSettingTab {
   private passphrase = '';
+  private appPassword = '';
 
   constructor(
     app: App,
@@ -96,38 +98,66 @@ export class AtprotoSyncSettingTab extends PluginSettingTab {
             control: { type: 'text', key: 'identifier', defaultValue: '' },
           },
           {
+            name: 'Sign-in method',
+            desc: 'Sign in with Bluesky opens your PDS login page in the browser. An app password is created in your PDS account settings — not your main password.',
+            aliases: ['oauth', 'login', 'app password'],
+            render: (setting: Setting) => {
+              setting.addDropdown((d) =>
+                d
+                  .addOption('oauth', 'Sign in with Bluesky')
+                  .addOption('app-password', 'App password')
+                  .setValue(plugin.settings.authMode)
+                  .onChange(async (v) => {
+                    // Never leave one method's credentials live under the other.
+                    await plugin.signOut();
+                    plugin.settings.authMode = v as AuthMode;
+                    await plugin.saveSettings();
+                    this.update();
+                  })
+              );
+            },
+          },
+          {
             name: 'Sign in with Bluesky',
-            aliases: ['oauth', 'login'],
+            visible: () => plugin.settings.authMode === 'oauth',
             render: (setting: Setting) => {
               const s = plugin.settings;
               setting
-                .setDesc(
-                  s.authMode === 'oauth' && s.authDid
-                    ? `Signed in via OAuth as ${s.authDid}`
-                    : 'Opens your PDS login page in the browser — no app password needed.'
-                )
+                .setDesc(s.authDid ? `Signed in as ${s.authDid}` : 'Not signed in.')
                 .addButton((b) =>
                   b
-                    .setButtonText('Sign in')
+                    .setButtonText(s.authDid ? 'Sign in again' : 'Sign in')
                     .setCta()
                     .onClick(() => void this.startSignIn())
                 );
             },
           },
           {
+            name: 'App password',
+            visible: () => plugin.settings.authMode === 'app-password',
+            render: (setting: Setting) => {
+              const s = plugin.settings;
+              setting
+                .setDesc(s.appPassword ? `Signed in as ${s.identifier}` : 'Not signed in.')
+                .addText((t) => {
+                  t.inputEl.type = 'password';
+                  t.setPlaceholder('xxxx-xxxx-xxxx-xxxx').onChange((v) => (this.appPassword = v.trim()));
+                })
+                .addButton((b) =>
+                  b
+                    .setButtonText('Log in')
+                    .setCta()
+                    .onClick(() => void this.loginWithAppPassword())
+                );
+            },
+          },
+          {
             name: 'Log out',
+            visible: () => hasAuth(plugin.settings),
             render: (setting: Setting) => {
               setting.addButton((b) =>
                 b.setButtonText('Log out').onClick(async () => {
-                  const s = plugin.settings;
-                  if (s.authMode === 'oauth' && s.authDid) {
-                    await plugin.oauth.logout(s.authDid).catch(() => {});
-                  }
-                  s.appPassword = '';
-                  s.authDid = '';
-                  s.authMode = 'app-password';
-                  await plugin.saveSettings();
-                  plugin.disconnectEngine();
+                  await plugin.signOut();
                   this.update();
                 })
               );
@@ -192,37 +222,6 @@ export class AtprotoSyncSettingTab extends PluginSettingTab {
         type: 'group',
         heading: 'Advanced',
         items: [
-          {
-            name: 'App password',
-            desc: 'Fallback if Sign in with Bluesky is unavailable. Create one in your PDS account settings — not your main password.',
-            render: (setting: Setting) => {
-              setting
-                .addText((t) => {
-                  t.inputEl.type = 'password';
-                  t.setValue(plugin.settings.appPassword).onChange(async (v) => {
-                    plugin.settings.appPassword = v.trim();
-                    await plugin.saveSettings();
-                  });
-                })
-                .addButton((b) =>
-                  b.setButtonText('Test login').onClick(async () => {
-                    const s = plugin.settings;
-                    try {
-                      plugin.pdsClient = await login({
-                        identifier: s.identifier,
-                        password: s.appPassword,
-                        pdsUrl: s.pdsUrlOverride || undefined,
-                      });
-                      new Notice('ATProto Sync: login OK');
-                    } catch (err) {
-                      new Notice(
-                        `ATProto Sync: login failed — ${err instanceof Error ? err.message : err}`
-                      );
-                    }
-                  })
-                );
-            },
-          },
           {
             name: 'PDS URL',
             desc: 'Leave empty to auto-detect from your handle. Set for self-hosted or local testing, e.g. http://localhost:3000.',
@@ -299,6 +298,33 @@ export class AtprotoSyncSettingTab extends PluginSettingTab {
     } catch (err) {
       new Notice(`ATProto Sync: sign-in failed — ${err instanceof Error ? err.message : err}`);
     }
+  }
+
+  /** Log in with the typed app password; only a successful login replaces the stored one. */
+  private async loginWithAppPassword(): Promise<void> {
+    const s = this.plugin.settings;
+    if (!s.identifier || !this.appPassword) {
+      new Notice('ATProto Sync: enter your handle and app password.');
+      return;
+    }
+    try {
+      const client = await login({
+        identifier: s.identifier,
+        password: this.appPassword,
+        pdsUrl: s.pdsUrlOverride || undefined,
+      });
+      await this.plugin.signOut();
+      s.authMode = 'app-password';
+      s.appPassword = this.appPassword;
+      this.appPassword = '';
+      this.plugin.pdsClient = client;
+      await this.plugin.saveSettings();
+      new Notice('ATProto Sync: logged in.');
+      await this.plugin.initEngine();
+    } catch (err) {
+      new Notice(`ATProto Sync: login failed — ${err instanceof Error ? err.message : err}`);
+    }
+    this.update();
   }
 
   /** First device creates the vault record; later devices verify against it. */

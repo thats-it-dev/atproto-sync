@@ -11,38 +11,9 @@ import { setIconWithFallback } from './ui';
 import { AtprotoSyncSettingTab } from './settings';
 import { SetupWizard } from './setup-wizard';
 import { registerPublishCommands } from './publish';
+import { AtprotoSyncSettings, DEFAULT_SETTINGS, hasAuth, resolveSettings } from './auth-settings';
 
-export interface AtprotoSyncSettings {
-  identifier: string;
-  appPassword: string;
-  /** 'oauth' after a Sign in with Bluesky; app-password otherwise. */
-  authMode: 'app-password' | 'oauth';
-  /** DID of the OAuth session to restore on load. */
-  authDid: string;
-  /** Direct PDS URL, skipping handle resolution (self-hosted / local testing). */
-  pdsUrlOverride: string;
-  /** rkey of the app.notesky.vault record; set during onboarding. */
-  vaultRkey: string;
-  /** Cached master key (base64, device-local); set after passphrase entry. */
-  masterKeyB64: string;
-  syncIntervalMinutes: number;
-  ignorePatterns: string[];
-  /** True after an abandoned setup was rolled back; drives the alert status icon. */
-  setupIncomplete: boolean;
-}
-
-export const DEFAULT_SETTINGS: AtprotoSyncSettings = {
-  identifier: '',
-  appPassword: '',
-  authMode: 'app-password',
-  authDid: '',
-  pdsUrlOverride: '',
-  vaultRkey: '',
-  masterKeyB64: '',
-  syncIntervalMinutes: 5,
-  ignorePatterns: [],
-  setupIncomplete: false,
-};
+export type { AtprotoSyncSettings } from './auth-settings';
 
 const DEBOUNCE_MS = 2000;
 
@@ -77,18 +48,21 @@ export default class AtprotoSyncPlugin extends Plugin {
    * the device.
    */
   async wipeAuth(): Promise<void> {
+    this.settings.setupIncomplete = true;
+    await this.signOut();
+  }
+
+  /**
+   * Revoke the OAuth session (if any) and clear stored credentials. The chosen
+   * sign-in method is kept, so the user signs back in the same way.
+   */
+  async signOut(): Promise<void> {
     const s = this.settings;
-    if (s.authMode === 'oauth' && s.authDid) {
-      await this.oauth.logout(s.authDid).catch(() => {});
-    }
+    if (s.authDid) await this.oauth.logout(s.authDid).catch(() => {});
     s.appPassword = '';
     s.authDid = '';
-    s.authMode = 'app-password';
-    s.setupIncomplete = true;
-    this.pdsClient = null;
-    this.engine = null;
     await this.saveSettings();
-    this.setStatus('setup');
+    this.disconnectEngine();
   }
   private engine: SyncEngine | null = null;
   private vaultAdapter: ObsidianVaultAdapter | null = null;
@@ -106,7 +80,7 @@ export default class AtprotoSyncPlugin extends Plugin {
   async onload() {
     this.store = new IndexedDbStore(this.app.vault.getName());
     const saved = await this.store.loadSettings();
-    this.settings = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
+    this.settings = resolveSettings(saved as Partial<AtprotoSyncSettings> | null);
 
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass('mod-clickable', 'atproto-sync-status');
@@ -136,6 +110,7 @@ export default class AtprotoSyncPlugin extends Plugin {
           const session = await this.oauth.completeCallback(params);
           this.settings.authMode = 'oauth';
           this.settings.authDid = session.did;
+          this.settings.appPassword = '';
           // Ready for onboarding (vault record setup) even before the engine can start.
           this.pdsClient = new RealPdsClient(new Agent(session), session.did);
           await this.saveSettings();
@@ -161,9 +136,7 @@ export default class AtprotoSyncPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() =>
       void (async () => {
         const s = this.settings;
-        const hasAuth =
-          s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
-        if (hasAuth && (!s.masterKeyB64 || !s.vaultRkey)) {
+        if (hasAuth(s) && (!s.masterKeyB64 || !s.vaultRkey)) {
           // A half-finished setup survived a restart: roll it back.
           await this.wipeAuth();
           new Notice(
@@ -206,9 +179,7 @@ export default class AtprotoSyncPlugin extends Plugin {
   /** (Re)build the engine from settings; called on load and after onboarding. */
   async initEngine(): Promise<void> {
     const s = this.settings;
-    const hasAuth =
-      s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
-    if (!hasAuth || !s.masterKeyB64 || !s.vaultRkey) {
+    if (!hasAuth(s) || !s.masterKeyB64 || !s.vaultRkey) {
       this.setStatus('setup');
       return; // not onboarded yet; settings tab drives setup
     }
@@ -262,18 +233,11 @@ export default class AtprotoSyncPlugin extends Plugin {
   /** Danger-zone disconnect: revoke the session and forget everything device-local. */
   async disconnectAccount(): Promise<void> {
     const s = this.settings;
-    if (s.authMode === 'oauth' && s.authDid) {
-      await this.oauth.logout(s.authDid).catch(() => {});
-    }
     s.identifier = '';
-    s.appPassword = '';
-    s.authDid = '';
-    s.authMode = 'app-password';
     s.masterKeyB64 = '';
     s.vaultRkey = '';
     s.setupIncomplete = false;
-    await this.saveSettings();
-    this.disconnectEngine();
+    await this.signOut();
   }
 
   private scheduleSync(): void {
@@ -295,9 +259,7 @@ export default class AtprotoSyncPlugin extends Plugin {
       // sync explains what is missing.
       if (manual) {
         const s = this.settings;
-        const hasAuth =
-          s.authMode === 'oauth' ? Boolean(s.authDid) : Boolean(s.identifier && s.appPassword);
-        if (!hasAuth) {
+        if (!hasAuth(s)) {
           new Notice('ATProto Sync: connect your account in settings first.');
         } else if (!s.masterKeyB64 || !s.vaultRkey) {
           new Notice(
