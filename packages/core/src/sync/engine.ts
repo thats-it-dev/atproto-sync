@@ -58,16 +58,14 @@ export interface SyncEngineOptions {
   rkeyGen?: () => string;
   /** Max writes per burst/batch (default 10). */
   batchSize?: number;
-  /** Pause between bursts so big initial syncs don't hammer the PDS. */
+  /** Pause between bursts so big initial syncs don't hammer the PDS. Needs `sleep`. */
   interBatchDelayMs?: number;
+  /** Host timer (core has no global it may use: `window` in Obsidian, Node timers in the CLI). */
+  sleep?: (ms: number) => Promise<void>;
   /** Called after each executed op (and each batch) with (done, total). */
   onProgress?: (done: number, total: number) => void;
   /** Non-fatal problems (e.g. undecryptable records) surface here. */
   onWarning?: (message: string) => void;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
 }
 
 let rkeyCounter = 0;
@@ -423,7 +421,7 @@ export class SyncEngine {
       this.opts.onProgress?.(done, total);
       if (burst >= batchSize && done < total) {
         burst = 0;
-        if (delayMs > 0) await sleep(delayMs);
+        if (delayMs > 0 && this.opts.sleep) await this.opts.sleep(delayMs);
       }
     };
 

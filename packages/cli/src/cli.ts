@@ -20,8 +20,8 @@ import { runSetup } from './setup';
 import { VERSION } from './version';
 
 export interface CliIO {
-  stdout(s: string): void;
-  stderr(s: string): void;
+  stdout: (s: string) => void;
+  stderr: (s: string) => void;
 }
 
 export interface CliEnv {

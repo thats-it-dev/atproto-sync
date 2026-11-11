@@ -46,7 +46,7 @@ export async function startCommand(
   const deadline = Date.now() + (ctl.waitMs ?? 3000);
   while (Date.now() < deadline && exitCode === null) {
     if ((await readLivePid()) === child.pid && (await readDaemonState(vaultDir))?.pid === child.pid) {
-      return { ok: true, pid: child.pid!, logPath: logPath() };
+      return { ok: true, pid: child.pid, logPath: logPath() };
     }
     await sleep(100);
   }
