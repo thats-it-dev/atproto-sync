@@ -80,7 +80,7 @@ export default class AtprotoSyncPlugin extends Plugin {
   async onload() {
     this.store = new IndexedDbStore(this.app.vault.getName());
     const saved = await this.store.loadSettings();
-    this.settings = resolveSettings(saved as Partial<AtprotoSyncSettings> | null);
+    this.settings = resolveSettings(saved);
 
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass('mod-clickable', 'atproto-sync-status');
@@ -203,6 +203,7 @@ export default class AtprotoSyncPlugin extends Plugin {
         masterKey: await fromB64(s.masterKeyB64),
         vaultRkey: s.vaultRkey,
         interBatchDelayMs: 300,
+        sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
         onWarning: (msg) => new Notice(`ATProto Sync: ${msg}`, 10_000),
         onProgress: (done, total) => {
           if (total <= 50) return;

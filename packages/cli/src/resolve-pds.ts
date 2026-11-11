@@ -29,7 +29,7 @@ export async function resolvePdsUrl(handle: string): Promise<{ did: string; pdsU
   try {
     const docRes = await fetch(didDocUrl);
     if (!docRes.ok) throw new Error(`DID document request returned ${docRes.status}`);
-    doc = await docRes.json();
+    doc = (await docRes.json()) as typeof doc;
   } catch (err) {
     throw new Error(`Could not fetch DID document for ${did}: ${String((err as Error).message)}`);
   }

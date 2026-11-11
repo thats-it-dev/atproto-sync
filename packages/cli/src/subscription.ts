@@ -21,8 +21,10 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 
 export function decodeFrame(bytes: Uint8Array): Frame | null {
   try {
-    const [header, rest] = decodeFirst(bytes, { tags: TAGS as never });
-    const [body] = decodeFirst(rest, { tags: TAGS as never });
+    const first: [unknown, Uint8Array] = decodeFirst(bytes, { tags: TAGS });
+    const [header, rest] = first;
+    const second: [unknown, Uint8Array] = decodeFirst(rest, { tags: TAGS });
+    const [body] = second;
     if (!isObject(header) || typeof header.op !== 'number' || !isObject(body)) return null;
     return { header: header as Frame['header'], body };
   } catch {
